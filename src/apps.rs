@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use freedesktop_desktop_entry::{DesktopEntry, Iter, default_paths, get_languages_from_env};
 
+use crate::kde;
+
 /// A launchable application distilled from a `.desktop` file.
 #[derive(Debug, Clone)]
 pub struct AppEntry {
@@ -14,6 +16,8 @@ pub struct AppEntry {
     pub generic_name: Option<String>,
     pub comment: Option<String>,
     pub keywords: Vec<String>,
+    /// Stable desktop-file id (e.g. `org.kde.dolphin.desktop`), used for usage tracking.
+    pub desktop_id: String,
     /// Path to the source `.desktop` file (used by `gio launch`).
     pub desktop_path: PathBuf,
     /// Raw `Icon=` value (name or absolute path), resolved to a file lazily.
@@ -103,6 +107,7 @@ fn to_app_entry(e: &DesktopEntry, locales: &[String]) -> Option<AppEntry> {
             .keywords(locales)
             .map(|v| v.into_iter().map(|c| c.to_string()).collect())
             .unwrap_or_default(),
+        desktop_id: e.appid.clone(),
         desktop_path: e.path.clone(),
         icon: e.icon().map(|s| s.to_string()),
         argv,
@@ -136,16 +141,22 @@ fn binary_exists(name: &str) -> bool {
 // ---- icon resolution -------------------------------------------------------
 
 /// Resolves freedesktop icon names to concrete file paths, memoized. The icon
-/// theme is detected once from KDE's `kdeglobals`.
+/// theme comes from config or, by default, KDE's `kdeglobals`.
 pub struct IconResolver {
     theme: String,
+    size: u16,
     cache: HashMap<String, Option<PathBuf>>,
 }
 
 impl IconResolver {
-    pub fn new() -> Self {
+    pub fn new(size: u16, theme_override: Option<String>) -> Self {
+        let theme = theme_override
+            .filter(|s| !s.is_empty())
+            .or_else(kde::icon_theme)
+            .unwrap_or_else(|| "breeze".to_string());
         Self {
-            theme: detect_icon_theme(),
+            theme,
+            size: size.max(8),
             cache: HashMap::new(),
         }
     }
@@ -167,36 +178,10 @@ impl IconResolver {
             return p.exists().then(|| p.to_path_buf());
         }
         freedesktop_icons::lookup(icon)
-            .with_size(48)
+            .with_size(self.size)
             .with_scale(2)
             .with_theme(&self.theme)
             .with_cache()
             .find()
     }
-}
-
-/// Read the active icon theme from KDE's `kdeglobals` (`[Icons] Theme=`),
-/// falling back to Breeze.
-fn detect_icon_theme() -> String {
-    let Some(path) = dirs::config_dir().map(|p| p.join("kdeglobals")) else {
-        return "breeze".to_string();
-    };
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return "breeze".to_string();
-    };
-    let mut in_icons = false;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_icons = line == "[Icons]";
-        } else if in_icons {
-            if let Some(theme) = line.strip_prefix("Theme=") {
-                let theme = theme.trim();
-                if !theme.is_empty() {
-                    return theme.to_string();
-                }
-            }
-        }
-    }
-    "breeze".to_string()
 }

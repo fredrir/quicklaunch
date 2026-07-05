@@ -4,14 +4,16 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::apps::AppEntry;
+use crate::usage::Usage;
 
 /// Small boost so a name hit outranks a keyword-only hit of equal raw score.
 const NAME_BOOST: u32 = 8;
 
 /// Rank apps against `query`, returning indices into `apps`, best first, capped at
 /// `limit`. An empty/whitespace query yields no results (results appear only when
-/// something is typed).
-pub fn rank(query: &str, apps: &[AppEntry], limit: usize) -> Vec<usize> {
+/// something is typed). When `freq_on`, a usage-based boost nudges frequently- and
+/// recently-launched apps upward.
+pub fn rank(query: &str, apps: &[AppEntry], limit: usize, usage: &Usage, freq_on: bool) -> Vec<usize> {
     if query.trim().is_empty() {
         return Vec::new();
     }
@@ -23,7 +25,8 @@ pub fn rank(query: &str, apps: &[AppEntry], limit: usize) -> Vec<usize> {
     let mut scored: Vec<(u32, usize)> = Vec::new();
     for (i, app) in apps.iter().enumerate() {
         if let Some(score) = best_score(&pattern, &mut matcher, &mut buf, app) {
-            scored.push((score, i));
+            let boost = if freq_on { usage.boost(&app.desktop_id) } else { 0 };
+            scored.push((score + boost, i));
         }
     }
 

@@ -1,5 +1,5 @@
 [package]
-name = "kde-app-launcher"
+name = "quicklaunch"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,7 +10,9 @@ iced_runtime = "0.14"                       # Action::Exit to close the launcher
 freedesktop-desktop-entry = "0.8"
 nucleo-matcher = "0.3"
 freedesktop-icons = "0.4"
-dirs = "5"                                  # ~/.config/kdeglobals path
+dirs = "5"                                  # ~/.config, ~/.local/share, kdeglobals
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"                                # config.toml, palette.toml, usage.toml
 
 # Perf: small, fast release binary (matters for cold-start spawn-per-invoke)
 [profile.release]

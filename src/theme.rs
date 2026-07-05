@@ -1,0 +1,157 @@
+//! Resolved color theme.
+//!
+//! Precedence (per `[theme].source`, default `auto`):
+//!   1. explicit `[theme]` hex overrides (always win, per field)
+//!   2. `~/dotfiles/theme/palette.toml` — `[kde]` roles → `[palette]` colors
+//!   3. the live KDE color scheme (kdeglobals `[Colors:*]`)
+//!   4. built-in defaults
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use iced::Color;
+
+use crate::config::{ThemeCfg, ThemeSource};
+use crate::kde;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Theme {
+    /// Panel background (opaque; the window opacity is applied at style time).
+    pub bg: Color,
+    pub text: Color,
+    pub muted: Color,
+    pub placeholder: Color,
+    pub accent: Color,
+    /// Base color for the selected row (alpha applied at style time).
+    pub selection: Color,
+    pub hairline: Color,
+    pub faint: Color,
+}
+
+mod def {
+    use iced::Color;
+    pub const BG: Color = Color::from_rgb(0.070, 0.070, 0.086);
+    pub const TEXT: Color = Color::from_rgb(0.925, 0.925, 0.925);
+    pub const MUTED: Color = Color::from_rgb(0.604, 0.627, 0.651);
+    pub const ACCENT: Color = Color::from_rgb(0.239, 0.682, 0.914);
+    pub const SELECTION: Color = Color::from_rgb(0.239, 0.682, 0.914);
+}
+
+impl Theme {
+    pub fn resolve(cfg: &ThemeCfg) -> Theme {
+        let mut bg = def::BG;
+        let mut text = def::TEXT;
+        let mut muted = def::MUTED;
+        let mut accent = def::ACCENT;
+        let mut selection = def::SELECTION;
+
+        let use_palette = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Palette);
+        let use_kde = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Kde);
+
+        let mut applied = false;
+        if use_palette {
+            if let Some(p) = Palette::load(cfg.palette_path.as_deref()) {
+                if let Some(c) = p.role("view_bg") { bg = c; }
+                if let Some(c) = p.role("foreground") { text = c; }
+                if let Some(c) = p.role("inactive") { muted = c; }
+                if let Some(c) = p.role("accent") { accent = c; }
+                if let Some(c) = p.role("selection_bg") { selection = c; }
+                applied = true;
+            }
+        }
+        // KDE color scheme as the fallback (or the primary when source = "kde").
+        if use_kde && !applied {
+            if let Some(c) = kde::color("Colors:View", "BackgroundNormal") { bg = c; }
+            if let Some(c) = kde::color("Colors:View", "ForegroundNormal") { text = c; }
+            if let Some(c) = kde::color("Colors:View", "ForegroundInactive") { muted = c; }
+            if let Some(c) = kde::accent().or_else(|| kde::color("Colors:Selection", "BackgroundNormal")) {
+                accent = c;
+            }
+            if let Some(c) = kde::color("Colors:Selection", "BackgroundNormal") { selection = c; }
+        }
+
+        // Explicit hex overrides always take precedence.
+        if let Some(c) = cfg.background.as_deref().and_then(parse_hex) { bg = c; }
+        if let Some(c) = cfg.text.as_deref().and_then(parse_hex) { text = c; }
+        if let Some(c) = cfg.muted.as_deref().and_then(parse_hex) { muted = c; }
+        if let Some(c) = cfg.accent.as_deref().and_then(parse_hex) { accent = c; }
+        if let Some(c) = cfg.selection.as_deref().and_then(parse_hex) { selection = c; }
+
+        let placeholder = cfg
+            .placeholder
+            .as_deref()
+            .and_then(parse_hex)
+            .unwrap_or_else(|| with_alpha(muted, 0.75));
+
+        Theme {
+            bg,
+            text,
+            muted,
+            placeholder,
+            accent,
+            selection,
+            hairline: with_alpha(text, 0.07),
+            faint: with_alpha(text, 0.06),
+        }
+    }
+}
+
+/// Apply an alpha to a color.
+pub fn with_alpha(c: Color, a: f32) -> Color {
+    Color { a, ..c }
+}
+
+/// Parse a `#rrggbb` hex color.
+pub fn parse_hex(s: &str) -> Option<Color> {
+    let s = s.trim().trim_start_matches('#');
+    if s.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+    Some(Color::from_rgb8(r, g, b))
+}
+
+/// The user's palette: named colors plus a `[kde]` role → name map.
+struct Palette {
+    colors: HashMap<String, String>,
+    roles: HashMap<String, String>,
+}
+
+impl Palette {
+    fn load(path: Option<&str>) -> Option<Palette> {
+        let path = expand_tilde(path.unwrap_or("~/dotfiles/theme/palette.toml"));
+        let text = std::fs::read_to_string(path).ok()?;
+        let value: toml::Value = toml::from_str(&text).ok()?;
+        Some(Palette {
+            colors: string_table(value.get("palette")?),
+            roles: string_table(value.get("kde")?),
+        })
+    }
+
+    /// Resolve a `[kde]` role (e.g. "accent") through `[palette]` to a color.
+    fn role(&self, role: &str) -> Option<Color> {
+        let name = self.roles.get(role)?;
+        parse_hex(self.colors.get(name)?)
+    }
+}
+
+fn string_table(v: &toml::Value) -> HashMap<String, String> {
+    v.as_table()
+        .map(|t| {
+            t.iter()
+                .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
+}

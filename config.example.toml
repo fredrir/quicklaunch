@@ -1,0 +1,46 @@
+# quicklaunch configuration — copy to ~/.config/quicklaunch/config.toml
+#
+# Everything here is optional; omitted keys use the defaults shown. The launcher
+# re-reads this file every time it opens, so edits apply on the next Meta+Space.
+
+[window]
+width       = 640    # panel width in px
+top_offset  = 220    # distance from the top of the screen to the search bar
+max_results = 8      # number of results shown
+radius      = 16     # panel corner radius
+row_height  = 52     # height of each result row
+opacity     = 0.96   # panel background alpha (0.0–1.0)
+
+[behavior]
+close_on_click_outside = true
+close_on_focus_loss    = true
+frequency_ranking      = true   # boost frequently/recently launched apps
+# single_click: omit to follow KDE's setting; set true/false to override
+# single_click = true
+
+[theme]
+# source = how colors are chosen:
+#   "auto"    (default) palette.toml → KDE color scheme → built-in defaults
+#   "palette" only palette.toml (then defaults)
+#   "kde"     only the live KDE color scheme (kdeglobals [Colors:*])
+#   "custom"  only the hex overrides below, on built-in defaults
+source       = "auto"
+palette_path = "~/dotfiles/theme/palette.toml"
+
+# Per-field hex overrides — always win when set (any subset):
+# accent      = "#b4befe"
+# background  = "#1e1e2e"
+# text        = "#cdd6f4"
+# muted       = "#9399b2"
+# selection   = "#b4befe"
+# placeholder = "#6c7086"
+
+[font]
+# family: omit to follow KDE's general font, else falls back to "Noto Sans"
+# family = "Inter"
+size = 20
+
+[icons]
+size = 40
+# theme: omit to follow KDE's icon theme (kdeglobals [Icons] Theme)
+# theme = "breeze-dark"

@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Substring expected in the running process's cmdline, to guard against pid reuse.
-const BIN_MARKER: &str = "kde-app-launcher";
+const BIN_MARKER: &str = "quicklaunch";
 
 fn pid_path() -> PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    dir.join("kde-app-launcher.pid")
+    dir.join("quicklaunch.pid")
 }
 
 /// If another launcher instance is running, signal it to quit and return `true`

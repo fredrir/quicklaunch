@@ -1,51 +1,21 @@
-//! Design tokens for the "spotlight" aesthetic.
-//!
-//! All visual constants live here so the look can be tuned in one place. Colors are
-//! dark, Breeze-adjacent. Note: wlr-layer-shell surfaces on KWin get per-pixel alpha
-//! but *not* blur-behind, so panels are kept fairly opaque for legibility.
+//! Component styles, driven by a resolved [`Theme`]. Geometry that isn't user-facing
+//! lives here as constants; user-configurable geometry comes from `config::Window`.
 
 use iced::widget::{container, text_input};
-use iced::{Background, Border, Color, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Shadow, Vector};
 
-// ---- palette ---------------------------------------------------------------
+use crate::theme::{Theme, with_alpha};
 
-/// Near-opaque panel background (KWin has no blur-behind for layer surfaces).
-pub const PANEL_BG: Color = Color::from_rgba(0.070, 0.070, 0.086, 0.94);
-/// Primary text.
-pub const TEXT: Color = Color::from_rgb(0.925, 0.925, 0.925);
-/// Muted secondary text (generic name / comment).
-pub const TEXT_MUTED: Color = Color::from_rgb(0.604, 0.627, 0.651);
-/// Placeholder text inside the search field.
-pub const TEXT_PLACEHOLDER: Color = Color::from_rgb(0.42, 0.44, 0.47);
-/// Selected-row background (Breeze accent blue, translucent).
-pub const SELECTED_BG: Color = Color::from_rgba(0.239, 0.682, 0.914, 0.20);
-/// Faint fill for the generic-icon fallback.
-pub const FAINT_FILL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.06);
-/// Hairline border on panels.
-pub const HAIRLINE: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.07);
-
-// ---- geometry --------------------------------------------------------------
-
-pub const PANEL_WIDTH: f32 = 640.0;
-pub const PANEL_RADIUS: f32 = 16.0;
-pub const ROW_RADIUS: f32 = 10.0;
-pub const TOP_OFFSET: f32 = 220.0;
-
-pub const SEARCH_FONT_SIZE: f32 = 20.0;
+// Fixed geometry.
 pub const NAME_FONT_SIZE: f32 = 15.0;
 pub const MUTED_FONT_SIZE: f32 = 12.0;
 pub const SEARCH_ICON_SIZE: f32 = 22.0;
-
-pub const ICON_SIZE: f32 = 40.0;
+pub const ROW_RADIUS: f32 = 10.0;
 pub const ROW_SPACING: f32 = 2.0;
-
 pub const PANEL_PADDING: f32 = 10.0;
 pub const GAP: f32 = 12.0;
-
-/// Maximum number of results rendered.
-pub const MAX_RESULTS: usize = 8;
-
-// ---- component styles ------------------------------------------------------
+pub const ICON_TEXT_SPACING: f32 = 14.0;
+pub const SELECTION_ALPHA: f32 = 0.22;
 
 const NO_SHADOW: Shadow = Shadow {
     color: Color::TRANSPARENT,
@@ -53,15 +23,15 @@ const NO_SHADOW: Shadow = Shadow {
     blur_radius: 0.0,
 };
 
-/// A floating panel container: rounded, translucent, soft drop shadow.
-pub fn panel(_theme: &Theme) -> container::Style {
+/// A floating panel: rounded, translucent (per `opacity`), soft drop shadow.
+pub fn panel(theme: &Theme, radius: f32, opacity: f32) -> container::Style {
     container::Style {
-        text_color: Some(TEXT),
-        background: Some(Background::Color(PANEL_BG)),
+        text_color: Some(theme.text),
+        background: Some(Background::Color(with_alpha(theme.bg, opacity))),
         border: Border {
-            color: HAIRLINE,
+            color: theme.hairline,
             width: 1.0,
-            radius: PANEL_RADIUS.into(),
+            radius: radius.into(),
         },
         shadow: Shadow {
             color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
@@ -72,11 +42,11 @@ pub fn panel(_theme: &Theme) -> container::Style {
     }
 }
 
-/// A result row's background: accent tint when selected, transparent otherwise.
-pub fn row(selected: bool) -> container::Style {
+/// A result row: accent-tinted when selected, transparent otherwise.
+pub fn row(theme: &Theme, selected: bool) -> container::Style {
     container::Style {
-        text_color: Some(TEXT),
-        background: selected.then_some(Background::Color(SELECTED_BG)),
+        text_color: Some(theme.text),
+        background: selected.then_some(Background::Color(with_alpha(theme.accent, SELECTION_ALPHA))),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -87,11 +57,11 @@ pub fn row(selected: bool) -> container::Style {
     }
 }
 
-/// Fallback tile shown when an app has no resolvable icon.
-pub fn generic_icon(_theme: &Theme) -> container::Style {
+/// Fallback tile for an app with no resolvable icon.
+pub fn generic_icon(theme: &Theme) -> container::Style {
     container::Style {
         text_color: None,
-        background: Some(Background::Color(FAINT_FILL)),
+        background: Some(Background::Color(theme.faint)),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -102,8 +72,8 @@ pub fn generic_icon(_theme: &Theme) -> container::Style {
     }
 }
 
-/// The search field: borderless and transparent so it sits inside the pill.
-pub fn search_input(_theme: &Theme, _status: text_input::Status) -> text_input::Style {
+/// The search field: borderless/transparent so it sits inside the pill.
+pub fn search_input(theme: &Theme) -> text_input::Style {
     text_input::Style {
         background: Background::Color(Color::TRANSPARENT),
         border: Border {
@@ -111,9 +81,9 @@ pub fn search_input(_theme: &Theme, _status: text_input::Status) -> text_input::
             width: 0.0,
             radius: 0.0.into(),
         },
-        icon: TEXT_MUTED,
-        placeholder: TEXT_PLACEHOLDER,
-        value: TEXT,
-        selection: SELECTED_BG,
+        icon: theme.muted,
+        placeholder: theme.placeholder,
+        value: theme.text,
+        selection: with_alpha(theme.selection, SELECTION_ALPHA),
     }
 }
