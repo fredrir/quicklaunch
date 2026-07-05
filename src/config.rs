@@ -14,7 +14,6 @@ pub struct Config {
 #[serde(default)]
 pub struct Window {
     pub width: f32,
-    pub top_offset: f32,
     pub max_results: usize,
     pub radius: f32,
     pub row_height: f32,
@@ -25,7 +24,6 @@ impl Default for Window {
     fn default() -> Self {
         Self {
             width: 640.0,
-            top_offset: 220.0,
             max_results: 8,
             radius: 16.0,
             row_height: 52.0,
@@ -37,6 +35,7 @@ impl Default for Window {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Behavior {
+    pub opening_animation: bool,
     pub close_on_click_outside: bool,
     pub close_on_focus_loss: bool,
     pub frequency_ranking: bool,
@@ -46,6 +45,7 @@ pub struct Behavior {
 impl Default for Behavior {
     fn default() -> Self {
         Self {
+            opening_animation: false,
             close_on_click_outside: true,
             close_on_focus_loss: true,
             frequency_ranking: true,
@@ -59,7 +59,7 @@ impl Default for Behavior {
 pub enum ThemeSource {
     #[default]
     Auto,
-    Palette,
+    Config,
     Kde,
     Custom,
 }
@@ -68,7 +68,7 @@ pub enum ThemeSource {
 #[serde(default)]
 pub struct ThemeCfg {
     pub source: ThemeSource,
-    pub palette_path: Option<String>,
+    pub config_path: Option<String>,
     pub accent: Option<String>,
     pub background: Option<String>,
     pub text: Option<String>,

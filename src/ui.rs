@@ -3,10 +3,10 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget;
-use iced::alignment::{Horizontal, Vertical};
+use iced::alignment::Vertical;
 use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
-use iced::widget::{container, image, mouse_area, row, stack, svg, text, text_input, Column, Space};
+use iced::widget::{container, image, mouse_area, pin, responsive, row, stack, svg, text, text_input, Column, Space};
 use iced::{Color, Element, Event, Length, Padding, Pixels, Task};
 
 use iced_layershell::application;
@@ -38,6 +38,13 @@ enum Held {
 pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_layershell::Error> {
     let default_font = resolve_font(&config);
     let text_size = config.font.size();
+    let namespace = if config.behavior.opening_animation {
+        crate::APP_ID
+    } else {
+        // KWin applies its normal-window fade to arbitrary layer-shell namespaces.
+        // Its utility classification is intentionally excluded from opening effects.
+        "utility"
+    };
 
     application(
         move || Launcher::new(config.clone(), initial_query.clone()),
@@ -61,10 +68,6 @@ pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_lay
             ..Default::default()
         })
         .run()
-}
-
-fn namespace() -> String {
-    crate::APP_ID.to_string()
 }
 
 fn resolve_font(config: &Config) -> iced::Font {
@@ -174,16 +177,15 @@ impl Launcher {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let centered = container(mouse_area(self.panel()).on_press(Message::Ignore))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .padding(Padding {
-                top: self.config.window.top_offset,
-                right: 0.0,
-                bottom: 0.0,
-                left: 0.0,
-            });
+        let launcher = responsive(|size| {
+            let x = ((size.width - self.config.window.width) / 2.0).max(0.0);
+            let y = ((size.height - style::SEARCH_BAR_HEIGHT) / 2.0).max(0.0);
+
+            pin(mouse_area(self.panel()).on_press(Message::Ignore))
+                .x(x)
+                .y(y)
+                .into()
+        });
 
         if self.config.behavior.close_on_click_outside {
             let backdrop = mouse_area(
@@ -192,9 +194,9 @@ impl Launcher {
                     .height(Length::Fill),
             )
                 .on_press(Message::Dismiss);
-            stack![backdrop, centered].into()
+            stack![backdrop, launcher].into()
         } else {
-            centered.into()
+            launcher.into()
         }
     }
 
@@ -217,6 +219,7 @@ impl Launcher {
         let pill = container(row![magnifier, input].spacing(12).align_y(iced::Center))
             .padding(Padding::from([14.0, 18.0]))
             .width(Length::Fill)
+            .height(Length::Fixed(style::SEARCH_BAR_HEIGHT))
             .style(move |_theme| pill_style);
 
         let mut root = Column::new()

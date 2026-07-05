@@ -1,26 +1,24 @@
 [window]
-width = 640    # panel width in px
-top_offset = 220    # distance from the top of the screen to the search bar
+width = 640
 max_results = 8
 radius = 16
-row_height = 52     # height of each result row
-opacity = 0.96   # panel background alpha (0.0–1.0)
+row_height = 52
+opacity = 0.96   # bg alpha (0.0–1.0)
 
 [behavior]
+opening_animation = false   # opt in to KWin's opening animation
 close_on_click_outside = true
 close_on_focus_loss = true
-frequency_ranking = true   # boost frequently/recently launched apps
-# single_click: Use KDE's setting, set true/false to override
-# single_click = true
+frequency_ranking = true
+# single_click: Use KDE's setting - (true/false)
 
 [theme]
-# source = how colors are chosen:
 #   "auto"    (default)
-#   "palette" only palette.toml
+#   "config" only config.toml
 #   "kde"     only KDE
 #   "custom"  only hex overrides below
 source = "auto"
-palette_path = "~/.config/quicklaunch/palette.toml"
+config_path = "~/.config/quicklaunch/config.toml"
 
 # Example
 # accent      = "#b4befe"

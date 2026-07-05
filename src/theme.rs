@@ -35,12 +35,12 @@ impl Theme {
         let mut accent = def::ACCENT;
         let mut selection = def::SELECTION;
 
-        let use_palette = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Palette);
+        let use_config = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Config);
         let use_kde = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Kde);
 
         let mut applied = false;
-        if use_palette {
-            if let Some(p) = Palette::load(cfg.palette_path.as_deref()) {
+        if use_config {
+            if let Some(p) = Config::load(cfg.config_path.as_deref()) {
                 if let Some(c) = p.role("view_bg") { bg = c; }
                 if let Some(c) = p.role("foreground") { text = c; }
                 if let Some(c) = p.role("inactive") { muted = c; }
@@ -99,18 +99,18 @@ pub fn parse_hex(s: &str) -> Option<Color> {
     Some(Color::from_rgb8(r, g, b))
 }
 
-struct Palette {
+struct Config {
     colors: HashMap<String, String>,
     roles: HashMap<String, String>,
 }
 
-impl Palette {
-    fn load(path: Option<&str>) -> Option<Palette> {
-        let path = expand_tilde(path.unwrap_or("~/dotfiles/theme/palette.toml"));
+impl Config {
+    fn load(path: Option<&str>) -> Option<Config> {
+        let path = expand_tilde(path.unwrap_or("~/.config/quicklaunch/config.toml"));
         let text = std::fs::read_to_string(path).ok()?;
         let value: toml::Value = toml::from_str(&text).ok()?;
-        Some(Palette {
-            colors: string_table(value.get("palette")?),
+        Some(Config {
+            colors: string_table(value.get("config")?),
             roles: string_table(value.get("kde")?),
         })
     }
