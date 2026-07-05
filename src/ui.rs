@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 use iced::advanced::widget;
 use iced::alignment::{Horizontal, Vertical};
@@ -27,6 +28,20 @@ use crate::{kde, launch, search, style};
 const SEARCH_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><line x1="21" y1="21" x2="16.8" y2="16.8"/></svg>"##;
 
 static INPUT_ID: LazyLock<widget::Id> = LazyLock::new(widget::Id::unique);
+
+// Self-managed key-repeat (layershellev's Wayland repeat doesn't fire under KWin's
+// exclusive keyboard grab). Driven by iced's async timer, so it's independent of the
+// broken Wayland-side repeat.
+const REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(350);
+const REPEAT_INTERVAL: Duration = Duration::from_millis(30);
+
+/// A repeatable action for a held key.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Held {
+    Prev,
+    Next,
+    Backspace,
+}
 
 /// Launch the layer-shell application. `initial_query` optionally pre-fills the search.
 pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_layershell::Error> {
@@ -88,6 +103,8 @@ struct Launcher {
     single_click: bool,
     /// Last clicked row, for double-click-to-launch mode.
     last_click: Option<usize>,
+    /// Currently-held repeatable key + when it was pressed (for key-repeat).
+    held: Option<(Held, Instant)>,
 }
 
 #[to_layer_message]
@@ -101,6 +118,8 @@ enum Message {
     Dismiss,
     /// A click landed on the panel — swallow it (so it doesn't dismiss) and keep focus.
     Ignore,
+    /// Key-repeat timer tick (active only while a repeatable key is held).
+    RepeatTick,
 }
 
 impl Launcher {
@@ -120,6 +139,7 @@ impl Launcher {
             theme,
             single_click,
             last_click: None,
+            held: None,
         };
         if let Some(query) = initial_query {
             launcher.set_query(query);
@@ -146,6 +166,10 @@ impl Launcher {
             Message::Dismiss => iced_runtime::exit(),
             // Clicking inside the panel keeps the search field focused.
             Message::Ignore => focus_input(),
+            Message::RepeatTick => {
+                self.repeat_tick();
+                Task::none()
+            }
             // Variants injected by `#[to_layer_message]`; we never emit them.
             _ => Task::none(),
         }
@@ -154,7 +178,15 @@ impl Launcher {
     fn subscription(&self) -> iced::Subscription<Message> {
         // `listen_with` (not `listen`) so we also receive keys the text field
         // captures — otherwise Escape/Enter never reach us.
-        iced::event::listen_with(key_filter)
+        let keys = iced::event::listen_with(key_filter);
+        if self.held.is_some() {
+            iced::Subscription::batch([
+                keys,
+                iced::time::every(REPEAT_INTERVAL).map(|_| Message::RepeatTick),
+            ])
+        } else {
+            keys
+        }
     }
 
     /// Transparent surface -> only the centered panel is visible.
@@ -329,26 +361,11 @@ impl Launcher {
     fn handle_event(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                match key {
-                    Key::Named(Named::Escape) => return iced_runtime::exit(),
-                    Key::Named(Named::Enter) => return self.launch_index(self.selected),
-                    Key::Named(Named::ArrowDown) => self.move_selection(1),
-                    Key::Named(Named::ArrowUp) => self.move_selection(-1),
-                    Key::Named(Named::Tab) => {
-                        self.move_selection(if modifiers.shift() { -1 } else { 1 })
-                    }
-                    Key::Named(Named::PageDown) => self.move_selection(5),
-                    Key::Named(Named::PageUp) => self.move_selection(-5),
-                    // vim / emacs-style navigation
-                    Key::Character(c) if modifiers.control() => match c.as_str() {
-                        "n" | "j" => self.move_selection(1),
-                        "p" | "k" => self.move_selection(-1),
-                        _ => {}
-                    },
-                    // Everything else (typing, backspace, Ctrl+A/C/V, cursor keys)
-                    // is the text field's job — leave it alone.
-                    _ => {}
-                }
+                self.on_key_pressed(key, modifiers)
+            }
+            // Releasing any key stops key-repeat.
+            Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
+                self.held = None;
                 Task::none()
             }
             Event::Window(iced::window::Event::Unfocused)
@@ -362,6 +379,64 @@ impl Launcher {
                 focus_input()
             }
             _ => Task::none(),
+        }
+    }
+
+    fn on_key_pressed(&mut self, key: Key, modifiers: iced::keyboard::Modifiers) -> Task<Message> {
+        // Which repeatable action (if any) does this key arm?
+        let held = match &key {
+            Key::Named(Named::ArrowDown) => Some(Held::Next),
+            Key::Named(Named::ArrowUp) => Some(Held::Prev),
+            Key::Named(Named::Tab) => Some(if modifiers.shift() { Held::Prev } else { Held::Next }),
+            Key::Named(Named::Backspace) => Some(Held::Backspace),
+            Key::Character(c) if modifiers.control() => match c.as_str() {
+                "n" | "j" => Some(Held::Next),
+                "p" | "k" => Some(Held::Prev),
+                _ => None,
+            },
+            _ => None,
+        };
+        // Arm/replace the held key for repeat (backspace's initial delete and the
+        // nav initial move are handled below / by the text field).
+        self.held = held.map(|h| (h, Instant::now()));
+
+        match key {
+            Key::Named(Named::Escape) => return iced_runtime::exit(),
+            Key::Named(Named::Enter) => return self.launch_index(self.selected),
+            Key::Named(Named::ArrowDown) => self.move_selection(1),
+            Key::Named(Named::ArrowUp) => self.move_selection(-1),
+            Key::Named(Named::Tab) => self.move_selection(if modifiers.shift() { -1 } else { 1 }),
+            Key::Named(Named::PageDown) => self.move_selection(5),
+            Key::Named(Named::PageUp) => self.move_selection(-5),
+            // vim / emacs-style navigation
+            Key::Character(c) if modifiers.control() => match c.as_str() {
+                "n" | "j" => self.move_selection(1),
+                "p" | "k" => self.move_selection(-1),
+                _ => {}
+            },
+            // Typing, backspace, Ctrl+A/C/V, cursor keys → the text field's job.
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// Apply a held key's action once the initial delay has elapsed (called on each
+    /// repeat-timer tick).
+    fn repeat_tick(&mut self) {
+        if let Some((held, since)) = self.held {
+            if since.elapsed() >= REPEAT_INITIAL_DELAY {
+                match held {
+                    Held::Next => self.move_selection(1),
+                    Held::Prev => self.move_selection(-1),
+                    Held::Backspace => {
+                        if !self.query.is_empty() {
+                            let mut query = self.query.clone();
+                            query.pop();
+                            self.set_query(query);
+                        }
+                    }
+                }
+            }
         }
     }
 }
