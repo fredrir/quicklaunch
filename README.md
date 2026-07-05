@@ -25,8 +25,9 @@ cargo build --release
 ./target/release/quicklaunch
 ```
 
-- Type to filter. Results appear below the bar. **↑ / ↓** move, **Enter** launches.
-- **Esc**, **clicking outside the panel**, or switching focus away dismisses it.
+- Type to filter. Results appear below the bar.
+- Move selection: **↑/↓**, **Tab / Shift+Tab**, **Ctrl+N/P**, **Ctrl+J/K**, **PageUp/PageDown**.
+- **Enter** launches the selection. **Esc**, **clicking outside**, or switching focus away dismisses.
 - **Click** a result to launch (or select-then-click in KDE double-click mode).
 - Pressing the hotkey again while open dismisses it (single-instance toggle).
 

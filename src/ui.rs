@@ -95,13 +95,11 @@ struct Launcher {
 enum Message {
     Changed(String),
     Event(Event),
-    /// Launch the currently-selected result.
-    Launch,
     /// Click on a specific result (launches, or selects then launches in dbl-click mode).
     Activate(usize),
     /// Dismiss the launcher (Esc / click outside / focus loss).
     Dismiss,
-    /// Swallow a click on the panel so it doesn't fall through to the backdrop.
+    /// A click landed on the panel — swallow it (so it doesn't dismiss) and keep focus.
     Ignore,
 }
 
@@ -136,7 +134,6 @@ impl Launcher {
                 Task::none()
             }
             Message::Event(event) => self.handle_event(event),
-            Message::Launch => self.launch_index(self.selected),
             Message::Activate(index) => {
                 if self.single_click || self.last_click == Some(index) {
                     self.launch_index(index)
@@ -147,14 +144,17 @@ impl Launcher {
                 }
             }
             Message::Dismiss => iced_runtime::exit(),
-            Message::Ignore => Task::none(),
+            // Clicking inside the panel keeps the search field focused.
+            Message::Ignore => focus_input(),
             // Variants injected by `#[to_layer_message]`; we never emit them.
             _ => Task::none(),
         }
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::event::listen().map(Message::Event)
+        // `listen_with` (not `listen`) so we also receive keys the text field
+        // captures — otherwise Escape/Enter never reach us.
+        iced::event::listen_with(key_filter)
     }
 
     /// Transparent surface -> only the centered panel is visible.
@@ -202,7 +202,6 @@ impl Launcher {
         let input = text_input("Search applications…", &self.query)
             .id(INPUT_ID.clone())
             .on_input(Message::Changed)
-            .on_submit(Message::Launch)
             .size(self.config.font.size())
             .padding(Padding::ZERO)
             .style(move |_theme, _status| input_style);
@@ -329,27 +328,58 @@ impl Launcher {
 
     fn handle_event(&mut self, event: Event) -> Task<Message> {
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: Key::Named(named),
-                ..
-            }) => {
-                match named {
-                    Named::Escape => return iced_runtime::exit(),
-                    Named::ArrowDown => self.move_selection(1),
-                    Named::ArrowUp => self.move_selection(-1),
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                match key {
+                    Key::Named(Named::Escape) => return iced_runtime::exit(),
+                    Key::Named(Named::Enter) => return self.launch_index(self.selected),
+                    Key::Named(Named::ArrowDown) => self.move_selection(1),
+                    Key::Named(Named::ArrowUp) => self.move_selection(-1),
+                    Key::Named(Named::Tab) => {
+                        self.move_selection(if modifiers.shift() { -1 } else { 1 })
+                    }
+                    Key::Named(Named::PageDown) => self.move_selection(5),
+                    Key::Named(Named::PageUp) => self.move_selection(-5),
+                    // vim / emacs-style navigation
+                    Key::Character(c) if modifiers.control() => match c.as_str() {
+                        "n" | "j" => self.move_selection(1),
+                        "p" | "k" => self.move_selection(-1),
+                        _ => {}
+                    },
+                    // Everything else (typing, backspace, Ctrl+A/C/V, cursor keys)
+                    // is the text field's job — leave it alone.
                     _ => {}
                 }
-                // Re-assert focus (iced_layershell #367 workaround).
-                focus_input()
+                Task::none()
             }
             Event::Window(iced::window::Event::Unfocused)
                 if self.config.behavior.close_on_focus_loss =>
             {
                 iced_runtime::exit()
             }
-            Event::Keyboard(_) | Event::Window(_) => focus_input(),
+            // Re-assert focus only on (rare) focus-gain — never per keystroke, which
+            // used to clear text selections and fight key handling.
+            Event::Window(iced::window::Event::Focused | iced::window::Event::Opened { .. }) => {
+                focus_input()
+            }
             _ => Task::none(),
         }
+    }
+}
+
+/// Subscription filter: deliver all keyboard events (even ones the text field
+/// captures, like Escape/Enter) plus the few window events we act on. Plain
+/// `event::listen()` drops captured events and would swallow Escape.
+fn key_filter(
+    event: Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    match event {
+        Event::Keyboard(_)
+        | Event::Window(iced::window::Event::Focused)
+        | Event::Window(iced::window::Event::Unfocused)
+        | Event::Window(iced::window::Event::Opened { .. }) => Some(Message::Event(event)),
+        _ => None,
     }
 }
 
