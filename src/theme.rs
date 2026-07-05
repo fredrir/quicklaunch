@@ -1,11 +1,3 @@
-//! Resolved color theme.
-//!
-//! Precedence (per `[theme].source`, default `auto`):
-//!   1. explicit `[theme]` hex overrides (always win, per field)
-//!   2. `~/dotfiles/theme/palette.toml` — `[kde]` roles → `[palette]` colors
-//!   3. the live KDE color scheme (kdeglobals `[Colors:*]`)
-//!   4. built-in defaults
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -16,13 +8,11 @@ use crate::kde;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
-    /// Panel background (opaque; the window opacity is applied at style time).
     pub bg: Color,
     pub text: Color,
     pub muted: Color,
     pub placeholder: Color,
     pub accent: Color,
-    /// Base color for the selected row (alpha applied at style time).
     pub selection: Color,
     pub hairline: Color,
     pub faint: Color,
@@ -59,7 +49,6 @@ impl Theme {
                 applied = true;
             }
         }
-        // KDE color scheme as the fallback (or the primary when source = "kde").
         if use_kde && !applied {
             if let Some(c) = kde::color("Colors:View", "BackgroundNormal") { bg = c; }
             if let Some(c) = kde::color("Colors:View", "ForegroundNormal") { text = c; }
@@ -70,7 +59,6 @@ impl Theme {
             if let Some(c) = kde::color("Colors:Selection", "BackgroundNormal") { selection = c; }
         }
 
-        // Explicit hex overrides always take precedence.
         if let Some(c) = cfg.background.as_deref().and_then(parse_hex) { bg = c; }
         if let Some(c) = cfg.text.as_deref().and_then(parse_hex) { text = c; }
         if let Some(c) = cfg.muted.as_deref().and_then(parse_hex) { muted = c; }
@@ -96,12 +84,10 @@ impl Theme {
     }
 }
 
-/// Apply an alpha to a color.
 pub fn with_alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
 }
 
-/// Parse a `#rrggbb` hex color.
 pub fn parse_hex(s: &str) -> Option<Color> {
     let s = s.trim().trim_start_matches('#');
     if s.len() != 6 {
@@ -113,7 +99,6 @@ pub fn parse_hex(s: &str) -> Option<Color> {
     Some(Color::from_rgb8(r, g, b))
 }
 
-/// The user's palette: named colors plus a `[kde]` role → name map.
 struct Palette {
     colors: HashMap<String, String>,
     roles: HashMap<String, String>,
@@ -130,7 +115,6 @@ impl Palette {
         })
     }
 
-    /// Resolve a `[kde]` role (e.g. "accent") through `[palette]` to a color.
     fn role(&self, role: &str) -> Option<Color> {
         let name = self.roles.get(role)?;
         parse_hex(self.colors.get(name)?)

@@ -6,15 +6,14 @@ edition = "2024"
 [dependencies]
 iced = { version = "0.14", features = ["tokio", "advanced", "svg", "image"] }
 iced_layershell = "0.18"
-iced_runtime = "0.14"                       # Action::Exit to close the launcher
+iced_runtime = "0.14"
 freedesktop-desktop-entry = "0.8"
 nucleo-matcher = "0.3"
 freedesktop-icons = "0.4"
-dirs = "5"                                  # ~/.config, ~/.local/share, kdeglobals
+dirs = "6.0.0"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"                                # config.toml, palette.toml, usage.toml
+toml = "1.1.2"
 
-# Perf: small, fast release binary (matters for cold-start spawn-per-invoke)
 [profile.release]
 opt-level = 3
 lto = "thin"

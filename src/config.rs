@@ -1,9 +1,3 @@
-//! User configuration, loaded from `~/.config/quicklaunch/config.toml`.
-//!
-//! Every field is optional; a missing file (or missing keys) yields sensible defaults.
-//! The launcher is spawn-per-invoke, so the config is re-read on every open — edits
-//! take effect on the next Meta+Space with no daemon or restart.
-
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -24,7 +18,6 @@ pub struct Window {
     pub max_results: usize,
     pub radius: f32,
     pub row_height: f32,
-    /// Panel background alpha (0.0–1.0).
     pub opacity: f32,
 }
 
@@ -47,7 +40,6 @@ pub struct Behavior {
     pub close_on_click_outside: bool,
     pub close_on_focus_loss: bool,
     pub frequency_ranking: bool,
-    /// `None` → follow KDE's single-click setting.
     pub single_click: Option<bool>,
 }
 
@@ -65,12 +57,10 @@ impl Default for Behavior {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeSource {
-    /// palette.toml → KDE color scheme → built-in defaults.
     #[default]
     Auto,
     Palette,
     Kde,
-    /// Only the explicit hex overrides below, on top of built-in defaults.
     Custom,
 }
 
@@ -78,9 +68,7 @@ pub enum ThemeSource {
 #[serde(default)]
 pub struct ThemeCfg {
     pub source: ThemeSource,
-    /// Path to the palette (default `~/dotfiles/theme/palette.toml`).
     pub palette_path: Option<String>,
-    // Per-field hex overrides ("#rrggbb"); always win when set.
     pub accent: Option<String>,
     pub background: Option<String>,
     pub text: Option<String>,
@@ -92,7 +80,6 @@ pub struct ThemeCfg {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FontCfg {
-    /// `None` → follow KDE's general font, else "Noto Sans".
     pub family: Option<String>,
     pub size: Option<f32>,
 }
@@ -107,7 +94,6 @@ impl FontCfg {
 #[serde(default)]
 pub struct IconsCfg {
     pub size: u16,
-    /// `None` → follow KDE's icon theme.
     pub theme: Option<String>,
 }
 
@@ -121,7 +107,6 @@ impl Default for IconsCfg {
 }
 
 impl Config {
-    /// Load `~/.config/quicklaunch/config.toml`, falling back to defaults on any error.
     pub fn load() -> Self {
         let Some(path) = dirs::config_dir().map(|p| p.join("quicklaunch/config.toml")) else {
             return Self::default();

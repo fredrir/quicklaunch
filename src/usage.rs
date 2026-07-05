@@ -1,9 +1,3 @@
-//! Frequency/recency tracking, persisted to `~/.local/share/quicklaunch/usage.toml`.
-//!
-//! Each launch bumps a per-app count + timestamp; ranking adds a score boost so
-//! frequently- and recently-used apps surface higher (KDE Kickoff-style), keyed by
-//! stable desktop-file id.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,7 +13,6 @@ pub struct Usage {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct Record {
     count: u32,
-    /// Unix seconds of the last launch.
     last: u64,
 }
 
@@ -34,7 +27,6 @@ impl Usage {
             .unwrap_or_default()
     }
 
-    /// Record a launch of `desktop_id` and persist.
     pub fn record(&mut self, desktop_id: &str) {
         let now = now_unix();
         let entry = self.apps.entry(desktop_id.to_string()).or_insert(Record { count: 0, last: now });
@@ -43,15 +35,13 @@ impl Usage {
         self.save();
     }
 
-    /// A score boost for `desktop_id` combining frequency and recency. Returns 0 for
-    /// never-launched apps, so it only nudges ordering among equally-relevant matches.
     pub fn boost(&self, desktop_id: &str) -> u32 {
         let Some(r) = self.apps.get(desktop_id) else {
             return 0;
         };
         let freq = ((1.0 + r.count as f64).ln() * 25.0) as u32;
         let age_days = now_unix().saturating_sub(r.last) as f64 / 86_400.0;
-        let recency = (40.0 * (-age_days / 14.0).exp()) as u32; // decays over ~2 weeks
+        let recency = (40.0 * (-age_days / 14.0).exp()) as u32; // ~2 weeks
         freq + recency
     }
 

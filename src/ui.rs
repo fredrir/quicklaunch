@@ -1,7 +1,3 @@
-//! The spotlight UI: a centered, translucent search pill on a transparent
-//! full-screen wlr-layer-shell overlay. Results appear below only once the user
-//! types. Colors/geometry come from config + the resolved theme.
-
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
@@ -10,7 +6,7 @@ use iced::advanced::widget;
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
-use iced::widget::{Column, Space, container, image, mouse_area, row, stack, svg, text, text_input};
+use iced::widget::{container, image, mouse_area, row, stack, svg, text, text_input, Column, Space};
 use iced::{Color, Element, Event, Length, Padding, Pixels, Task};
 
 use iced_layershell::application;
@@ -24,26 +20,21 @@ use crate::theme::Theme;
 use crate::usage::Usage;
 use crate::{kde, launch, search, style};
 
-/// Inline magnifier icon (crisp, theme-independent, no external asset).
 const SEARCH_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><line x1="21" y1="21" x2="16.8" y2="16.8"/></svg>"##;
 
 static INPUT_ID: LazyLock<widget::Id> = LazyLock::new(widget::Id::unique);
 
-// Self-managed key-repeat (layershellev's Wayland repeat doesn't fire under KWin's
-// exclusive keyboard grab). Driven by iced's async timer, so it's independent of the
-// broken Wayland-side repeat.
 const REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(350);
 const REPEAT_INTERVAL: Duration = Duration::from_millis(30);
 
-/// A repeatable action for a held key.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Held {
     Prev,
     Next,
     Backspace,
+    Char(String),
 }
 
-/// Launch the layer-shell application. `initial_query` optionally pre-fills the search.
 pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_layershell::Error> {
     let default_font = resolve_font(&config);
     let text_size = config.font.size();
@@ -54,22 +45,22 @@ pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_lay
         Launcher::update,
         Launcher::view,
     )
-    .style(Launcher::style)
-    .subscription(Launcher::subscription)
-    .theme(|_state: &Launcher| iced::Theme::Dark)
-    .settings(Settings {
-        layer_settings: LayerShellSettings {
-            layer: Layer::Overlay,
-            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-            exclusive_zone: 0,
-            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        .style(Launcher::style)
+        .subscription(Launcher::subscription)
+        .theme(|_state: &Launcher| iced::Theme::Dark)
+        .settings(Settings {
+            layer_settings: LayerShellSettings {
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+                exclusive_zone: 0,
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                ..Default::default()
+            },
+            default_font,
+            default_text_size: Pixels(text_size),
             ..Default::default()
-        },
-        default_font,
-        default_text_size: Pixels(text_size),
-        ..Default::default()
-    })
-    .run()
+        })
+        .run()
 }
 
 fn namespace() -> String {
@@ -85,7 +76,6 @@ fn resolve_font(config: &Config) -> iced::Font {
     }
 }
 
-/// One rendered result: an app index plus its (lazily) resolved icon path.
 struct ResultRow {
     app: usize,
     icon: Option<PathBuf>,
@@ -101,9 +91,7 @@ struct Launcher {
     config: Config,
     theme: Theme,
     single_click: bool,
-    /// Last clicked row, for double-click-to-launch mode.
     last_click: Option<usize>,
-    /// Currently-held repeatable key + when it was pressed (for key-repeat).
     held: Option<(Held, Instant)>,
 }
 
@@ -112,13 +100,9 @@ struct Launcher {
 enum Message {
     Changed(String),
     Event(Event),
-    /// Click on a specific result (launches, or selects then launches in dbl-click mode).
     Activate(usize),
-    /// Dismiss the launcher (Esc / click outside / focus loss).
     Dismiss,
-    /// A click landed on the panel — swallow it (so it doesn't dismiss) and keep focus.
     Ignore,
-    /// Key-repeat timer tick (active only while a repeatable key is held).
     RepeatTick,
 }
 
@@ -164,20 +148,13 @@ impl Launcher {
                 }
             }
             Message::Dismiss => iced_runtime::exit(),
-            // Clicking inside the panel keeps the search field focused.
             Message::Ignore => focus_input(),
-            Message::RepeatTick => {
-                self.repeat_tick();
-                Task::none()
-            }
-            // Variants injected by `#[to_layer_message]`; we never emit them.
+            Message::RepeatTick => self.repeat_tick(),
             _ => Task::none(),
         }
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // `listen_with` (not `listen`) so we also receive keys the text field
-        // captures — otherwise Escape/Enter never reach us.
         let keys = iced::event::listen_with(key_filter);
         if self.held.is_some() {
             iced::Subscription::batch([
@@ -189,7 +166,6 @@ impl Launcher {
         }
     }
 
-    /// Transparent surface -> only the centered panel is visible.
     fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         iced::theme::Style {
             background_color: Color::TRANSPARENT,
@@ -215,14 +191,13 @@ impl Launcher {
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
-            .on_press(Message::Dismiss);
+                .on_press(Message::Dismiss);
             stack![backdrop, centered].into()
         } else {
             centered.into()
         }
     }
 
-    /// The centered panel: search pill + (once typed) the results list.
     fn panel(&self) -> Element<'_, Message> {
         let win = &self.config.window;
 
@@ -306,16 +281,14 @@ impl Launcher {
                 .spacing(style::ICON_TEXT_SPACING)
                 .align_y(iced::Center),
         )
-        .width(Length::Fill)
-        .height(Length::Fixed(self.config.window.row_height))
-        .align_y(Vertical::Center)
-        .padding(Padding::from([0.0, 10.0]))
-        .style(move |_theme| row_style);
+            .width(Length::Fill)
+            .height(Length::Fixed(self.config.window.row_height))
+            .align_y(Vertical::Center)
+            .padding(Padding::from([0.0, 10.0]))
+            .style(move |_theme| row_style);
 
         mouse_area(body).on_press(Message::Activate(i)).into()
     }
-
-    // ---- state transitions -------------------------------------------------
 
     fn set_query(&mut self, query: String) {
         self.query = query;
@@ -360,21 +333,18 @@ impl Launcher {
 
     fn handle_event(&mut self, event: Event) -> Task<Message> {
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                self.on_key_pressed(key, modifiers)
-            }
-            // Releasing any key stops key-repeat.
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                                key, modifiers, text, ..
+                            }) => self.on_key_pressed(key, modifiers, text.map(|t| t.to_string())),
             Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
                 self.held = None;
                 Task::none()
             }
             Event::Window(iced::window::Event::Unfocused)
-                if self.config.behavior.close_on_focus_loss =>
-            {
-                iced_runtime::exit()
-            }
-            // Re-assert focus only on (rare) focus-gain — never per keystroke, which
-            // used to clear text selections and fight key handling.
+            if self.config.behavior.close_on_focus_loss =>
+                {
+                    iced_runtime::exit()
+                }
             Event::Window(iced::window::Event::Focused | iced::window::Event::Opened { .. }) => {
                 focus_input()
             }
@@ -382,68 +352,87 @@ impl Launcher {
         }
     }
 
-    fn on_key_pressed(&mut self, key: Key, modifiers: iced::keyboard::Modifiers) -> Task<Message> {
-        // Which repeatable action (if any) does this key arm?
-        let held = match &key {
-            Key::Named(Named::ArrowDown) => Some(Held::Next),
-            Key::Named(Named::ArrowUp) => Some(Held::Prev),
-            Key::Named(Named::Tab) => Some(if modifiers.shift() { Held::Prev } else { Held::Next }),
-            Key::Named(Named::Backspace) => Some(Held::Backspace),
-            Key::Character(c) if modifiers.control() => match c.as_str() {
-                "n" | "j" => Some(Held::Next),
-                "p" | "k" => Some(Held::Prev),
-                _ => None,
-            },
-            _ => None,
-        };
-        // Arm/replace the held key for repeat (backspace's initial delete and the
-        // nav initial move are handled below / by the text field).
-        self.held = held.map(|h| (h, Instant::now()));
-
-        match key {
+    fn on_key_pressed(
+        &mut self,
+        key: Key,
+        modifiers: iced::keyboard::Modifiers,
+        text: Option<String>,
+    ) -> Task<Message> {
+        let ctrl = modifiers.control();
+        let plain = !ctrl && !modifiers.alt() && !modifiers.logo();
+        let held: Option<Held> = match &key {
             Key::Named(Named::Escape) => return iced_runtime::exit(),
             Key::Named(Named::Enter) => return self.launch_index(self.selected),
-            Key::Named(Named::ArrowDown) => self.move_selection(1),
-            Key::Named(Named::ArrowUp) => self.move_selection(-1),
-            Key::Named(Named::Tab) => self.move_selection(if modifiers.shift() { -1 } else { 1 }),
-            Key::Named(Named::PageDown) => self.move_selection(5),
-            Key::Named(Named::PageUp) => self.move_selection(-5),
-            // vim / emacs-style navigation
-            Key::Character(c) if modifiers.control() => match c.as_str() {
-                "n" | "j" => self.move_selection(1),
-                "p" | "k" => self.move_selection(-1),
-                _ => {}
+            Key::Named(Named::ArrowDown) => {
+                self.move_selection(1);
+                Some(Held::Next)
+            }
+            Key::Named(Named::ArrowUp) => {
+                self.move_selection(-1);
+                Some(Held::Prev)
+            }
+            Key::Named(Named::Tab) => {
+                let back = modifiers.shift();
+                self.move_selection(if back { -1 } else { 1 });
+                Some(if back { Held::Prev } else { Held::Next })
+            }
+            Key::Named(Named::PageDown) => {
+                self.move_selection(5);
+                None
+            }
+            Key::Named(Named::PageUp) => {
+                self.move_selection(-5);
+                None
+            }
+            Key::Named(Named::Backspace) => Some(Held::Backspace),
+            Key::Character(c) if ctrl => match c.as_str() {
+                "n" | "j" => {
+                    self.move_selection(1);
+                    Some(Held::Next)
+                }
+                "p" | "k" => {
+                    self.move_selection(-1);
+                    Some(Held::Prev)
+                }
+                _ => None,
             },
-            // Typing, backspace, Ctrl+A/C/V, cursor keys → the text field's job.
-            _ => {}
-        }
+            _ if plain => text
+                .filter(|t| !t.is_empty() && !t.chars().all(char::is_control))
+                .map(Held::Char),
+            _ => None,
+        };
+        self.held = held.map(|h| (h, Instant::now()));
         Task::none()
     }
 
-    /// Apply a held key's action once the initial delay has elapsed (called on each
-    /// repeat-timer tick).
-    fn repeat_tick(&mut self) {
-        if let Some((held, since)) = self.held {
-            if since.elapsed() >= REPEAT_INITIAL_DELAY {
-                match held {
-                    Held::Next => self.move_selection(1),
-                    Held::Prev => self.move_selection(-1),
-                    Held::Backspace => {
-                        if !self.query.is_empty() {
-                            let mut query = self.query.clone();
-                            query.pop();
-                            self.set_query(query);
-                        }
-                    }
+    fn repeat_tick(&mut self) -> Task<Message> {
+        let Some((held, since)) = self.held.clone() else {
+            return Task::none();
+        };
+        if since.elapsed() < REPEAT_INITIAL_DELAY {
+            return Task::none();
+        }
+        match held {
+            Held::Next => self.move_selection(1),
+            Held::Prev => self.move_selection(-1),
+            Held::Backspace => {
+                if self.query.is_empty() {
+                    return Task::none();
                 }
+                let mut query = self.query.clone();
+                query.pop();
+                self.set_query(query);
+                return cursor_to_end();
+            }
+            Held::Char(text) => {
+                self.set_query(format!("{}{}", self.query, text));
+                return cursor_to_end();
             }
         }
+        Task::none()
     }
 }
 
-/// Subscription filter: deliver all keyboard events (even ones the text field
-/// captures, like Escape/Enter) plus the few window events we act on. Plain
-/// `event::listen()` drops captured events and would swallow Escape.
 fn key_filter(
     event: Event,
     _status: iced::event::Status,
@@ -458,9 +447,12 @@ fn key_filter(
     }
 }
 
-/// A `Task` that focuses the search field by id.
 fn focus_input() -> Task<Message> {
     iced_runtime::task::widget(widget::operation::focusable::focus(INPUT_ID.clone()))
+}
+
+fn cursor_to_end() -> Task<Message> {
+    iced_runtime::task::widget(widget::operation::text_input::move_cursor_to_end(INPUT_ID.clone()))
 }
 
 fn is_svg(path: &Path) -> bool {

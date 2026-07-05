@@ -1,34 +1,23 @@
-//! Application discovery: enumerate installed `.desktop` files, apply freedesktop
-//! visibility rules, and resolve icons lazily (only for visible results, to keep
-//! cold-start time minimal).
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use freedesktop_desktop_entry::{DesktopEntry, Iter, default_paths, get_languages_from_env};
+use freedesktop_desktop_entry::{default_paths, get_languages_from_env, DesktopEntry, Iter};
 
 use crate::kde;
 
-/// A launchable application distilled from a `.desktop` file.
 #[derive(Debug, Clone)]
 pub struct AppEntry {
     pub name: String,
     pub generic_name: Option<String>,
     pub comment: Option<String>,
     pub keywords: Vec<String>,
-    /// Stable desktop-file id (e.g. `org.kde.dolphin.desktop`), used for usage tracking.
     pub desktop_id: String,
-    /// Path to the source `.desktop` file (used by `gio launch`).
     pub desktop_path: PathBuf,
-    /// Raw `Icon=` value (name or absolute path), resolved to a file lazily.
     pub icon: Option<String>,
-    /// Pre-expanded argv (field codes stripped) for the `systemd-run` fallback.
     pub argv: Vec<String>,
     pub terminal: bool,
 }
 
-/// Index all installed applications, best-effort. Higher-priority XDG directories
-/// (e.g. `~/.local/share/applications`) shadow lower-priority ones by app-id.
 pub fn index_apps() -> Vec<AppEntry> {
     let locales = get_languages_from_env();
     let desktops = current_desktops();
@@ -37,8 +26,6 @@ pub fn index_apps() -> Vec<AppEntry> {
     let mut apps: Vec<AppEntry> = Vec::new();
 
     for entry in Iter::new(default_paths()).entries(Some(&locales)) {
-        // First occurrence of an app-id wins; a shadowing (even hidden) entry in a
-        // higher-priority dir intentionally suppresses the lower-priority one.
         if !seen.insert(entry.appid.clone()) {
             continue;
         }
@@ -54,7 +41,6 @@ pub fn index_apps() -> Vec<AppEntry> {
     apps
 }
 
-/// Apply the desktop-entry-spec rules for what a launcher should show.
 fn is_visible(e: &DesktopEntry, desktops: &[String]) -> bool {
     if e.type_() != Some("Application") {
         return false;
@@ -62,17 +48,14 @@ fn is_visible(e: &DesktopEntry, desktops: &[String]) -> bool {
     if e.no_display() || e.hidden() {
         return false;
     }
-    // Must be launchable: either an Exec line, or D-Bus activation.
     if e.exec().is_none() && !e.dbus_activatable() {
         return false;
     }
-    // TryExec gates on the named binary actually being installed.
     if let Some(try_exec) = e.try_exec() {
         if !binary_exists(try_exec) {
             return false;
         }
     }
-    // OnlyShowIn / NotShowIn desktop-environment gating (names are case-sensitive).
     if let Some(only) = e.only_show_in() {
         if !only.iter().any(|d| desktops.iter().any(|c| c == d)) {
             return false;
@@ -115,7 +98,6 @@ fn to_app_entry(e: &DesktopEntry, locales: &[String]) -> Option<AppEntry> {
     })
 }
 
-/// The current desktop(s) from `XDG_CURRENT_DESKTOP` (colon-separated, e.g. "KDE").
 fn current_desktops() -> Vec<String> {
     std::env::var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
@@ -125,7 +107,6 @@ fn current_desktops() -> Vec<String> {
         .collect()
 }
 
-/// True if `name` is an absolute existing path or is found on `$PATH`.
 fn binary_exists(name: &str) -> bool {
     let p = Path::new(name);
     if p.is_absolute() {
@@ -138,10 +119,6 @@ fn binary_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ---- icon resolution -------------------------------------------------------
-
-/// Resolves freedesktop icon names to concrete file paths, memoized. The icon
-/// theme comes from config or, by default, KDE's `kdeglobals`.
 pub struct IconResolver {
     theme: String,
     size: u16,
@@ -161,7 +138,6 @@ impl IconResolver {
         }
     }
 
-    /// Resolve an `Icon=` value to a file path, caching the result.
     pub fn resolve(&mut self, icon: &str) -> Option<PathBuf> {
         if let Some(hit) = self.cache.get(icon) {
             return hit.clone();
@@ -172,7 +148,6 @@ impl IconResolver {
     }
 
     fn lookup(&self, icon: &str) -> Option<PathBuf> {
-        // The spec allows Icon= to be an absolute path already.
         let p = Path::new(icon);
         if p.is_absolute() {
             return p.exists().then(|| p.to_path_buf());

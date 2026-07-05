@@ -1,6 +1,3 @@
-//! quicklaunch — a minimal, Spotlight-style application launcher for KDE Plasma on
-//! Wayland, built on iced + wlr-layer-shell.
-
 mod apps;
 mod config;
 mod kde;
@@ -12,33 +9,28 @@ mod theme;
 mod ui;
 mod usage;
 
-/// Reverse-DNS application id (Wayland app_id / layer namespace / desktop id stem).
 pub const APP_ID: &str = "io.github.fredrir.quicklaunch";
 
 fn main() -> Result<(), iced_layershell::Error> {
     let args: Vec<String> = std::env::args().collect();
     let config = config::Config::load();
 
-    // Headless debug path: `quicklaunch --list [query]`.
     if let Some(pos) = args.iter().position(|a| a == "--list") {
         debug_list(&config, args.get(pos + 1).map(String::as_str));
         return Ok(());
     }
 
-    // Headless debug path: `quicklaunch --theme` prints the resolved colors.
     if args.iter().any(|a| a == "--theme") {
         debug_theme(&config);
         return Ok(());
     }
 
-    // Optional `--query <text>` pre-fills the search field on boot.
     let initial_query = args
         .iter()
         .position(|a| a == "--query")
         .and_then(|pos| args.get(pos + 1))
         .cloned();
 
-    // Toggle semantics: if an instance is already showing, dismiss it and exit.
     if single::toggle_or_register() {
         return Ok(());
     }

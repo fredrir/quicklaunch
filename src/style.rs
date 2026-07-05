@@ -1,10 +1,7 @@
-//! Component styles, driven by a resolved [`Theme`]. Geometry that isn't user-facing
-//! lives here as constants; user-configurable geometry comes from `config::Window`.
-
 use iced::widget::{container, text_input};
 use iced::{Background, Border, Color, Shadow, Vector};
 
-use crate::theme::{Theme, with_alpha};
+use crate::theme::{with_alpha, Theme};
 
 // Fixed geometry.
 pub const NAME_FONT_SIZE: f32 = 15.0;
@@ -23,7 +20,7 @@ const NO_SHADOW: Shadow = Shadow {
     blur_radius: 0.0,
 };
 
-/// A floating panel: rounded, translucent (per `opacity`), soft drop shadow.
+/// A floating panel
 pub fn panel(theme: &Theme, radius: f32, opacity: f32) -> container::Style {
     container::Style {
         text_color: Some(theme.text),
@@ -42,7 +39,7 @@ pub fn panel(theme: &Theme, radius: f32, opacity: f32) -> container::Style {
     }
 }
 
-/// A result row: accent-tinted when selected, transparent otherwise.
+/// A result row
 pub fn row(theme: &Theme, selected: bool) -> container::Style {
     container::Style {
         text_color: Some(theme.text),
@@ -72,7 +69,7 @@ pub fn generic_icon(theme: &Theme) -> container::Style {
     }
 }
 
-/// The search field: borderless/transparent so it sits inside the pill.
+/// Search field
 pub fn search_input(theme: &Theme) -> text_input::Style {
     text_input::Style {
         background: Background::Color(Color::TRANSPARENT),
