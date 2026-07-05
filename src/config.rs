@@ -139,6 +139,7 @@ pub struct Behavior {
     pub close_on_focus_loss: bool,
     pub frequency_ranking: bool,
     pub single_click: Option<bool>,
+    pub resident: bool,
 }
 
 impl Default for Behavior {
@@ -149,6 +150,7 @@ impl Default for Behavior {
             close_on_focus_loss: true,
             frequency_ranking: true,
             single_click: None,
+            resident: false,
         }
     }
 }
@@ -218,7 +220,10 @@ impl Config {
         };
         match std::fs::read_to_string(&path) {
             Ok(text) => toml::from_str(&text).unwrap_or_else(|e| {
-                eprintln!("quicklaunch: config error in {}: {e}; using defaults", path.display());
+                eprintln!(
+                    "quicklaunch: config error in {}: {e}; using defaults",
+                    path.display()
+                );
                 Self::default()
             }),
             Err(_) => Self::default(),

@@ -1,9 +1,8 @@
 use iced::widget::{container, text_input};
 use iced::{Background, Border, Color, Shadow, Vector};
 
-use crate::theme::{with_alpha, Theme};
+use crate::theme::{Theme, with_alpha};
 
-// Fixed geometry.
 pub const NAME_FONT_SIZE: f32 = 15.0;
 pub const MUTED_FONT_SIZE: f32 = 12.0;
 pub const ROW_RADIUS: f32 = 10.0;
@@ -18,7 +17,6 @@ const NO_SHADOW: Shadow = Shadow {
     blur_radius: 0.0,
 };
 
-/// A floating panel
 pub fn panel(theme: &Theme, radius: f32, opacity: f32) -> container::Style {
     container::Style {
         text_color: Some(theme.text),
@@ -37,11 +35,11 @@ pub fn panel(theme: &Theme, radius: f32, opacity: f32) -> container::Style {
     }
 }
 
-/// A result row
 pub fn row(theme: &Theme, selected: bool) -> container::Style {
     container::Style {
         text_color: Some(theme.text),
-        background: selected.then_some(Background::Color(with_alpha(theme.accent, SELECTION_ALPHA))),
+        background: selected
+            .then_some(Background::Color(with_alpha(theme.accent, SELECTION_ALPHA))),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -52,7 +50,6 @@ pub fn row(theme: &Theme, selected: bool) -> container::Style {
     }
 }
 
-/// Fallback tile for an app with no resolvable icon.
 pub fn generic_icon(theme: &Theme) -> container::Style {
     container::Style {
         text_color: None,
@@ -67,7 +64,6 @@ pub fn generic_icon(theme: &Theme) -> container::Style {
     }
 }
 
-/// Search field
 pub fn search_input(theme: &Theme) -> text_input::Style {
     text_input::Style {
         background: Background::Color(Color::TRANSPARENT),

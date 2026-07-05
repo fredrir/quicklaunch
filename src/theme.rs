@@ -39,31 +39,59 @@ impl Theme {
         let use_kde = matches!(cfg.source, ThemeSource::Auto | ThemeSource::Kde);
 
         let mut applied = false;
-        if use_config {
-            if let Some(p) = Config::load(cfg.config_path.as_deref()) {
-                if let Some(c) = p.role("view_bg") { bg = c; }
-                if let Some(c) = p.role("foreground") { text = c; }
-                if let Some(c) = p.role("inactive") { muted = c; }
-                if let Some(c) = p.role("accent") { accent = c; }
-                if let Some(c) = p.role("selection_bg") { selection = c; }
-                applied = true;
+        if use_config && let Some(p) = Config::load(cfg.config_path.as_deref()) {
+            if let Some(c) = p.role("view_bg") {
+                bg = c;
             }
-        }
-        if use_kde && !applied {
-            if let Some(c) = kde::color("Colors:View", "BackgroundNormal") { bg = c; }
-            if let Some(c) = kde::color("Colors:View", "ForegroundNormal") { text = c; }
-            if let Some(c) = kde::color("Colors:View", "ForegroundInactive") { muted = c; }
-            if let Some(c) = kde::accent().or_else(|| kde::color("Colors:Selection", "BackgroundNormal")) {
+            if let Some(c) = p.role("foreground") {
+                text = c;
+            }
+            if let Some(c) = p.role("inactive") {
+                muted = c;
+            }
+            if let Some(c) = p.role("accent") {
                 accent = c;
             }
-            if let Some(c) = kde::color("Colors:Selection", "BackgroundNormal") { selection = c; }
+            if let Some(c) = p.role("selection_bg") {
+                selection = c;
+            }
+            applied = true;
+        }
+        if use_kde && !applied {
+            if let Some(c) = kde::color("Colors:View", "BackgroundNormal") {
+                bg = c;
+            }
+            if let Some(c) = kde::color("Colors:View", "ForegroundNormal") {
+                text = c;
+            }
+            if let Some(c) = kde::color("Colors:View", "ForegroundInactive") {
+                muted = c;
+            }
+            if let Some(c) =
+                kde::accent().or_else(|| kde::color("Colors:Selection", "BackgroundNormal"))
+            {
+                accent = c;
+            }
+            if let Some(c) = kde::color("Colors:Selection", "BackgroundNormal") {
+                selection = c;
+            }
         }
 
-        if let Some(c) = cfg.background.as_deref().and_then(parse_hex) { bg = c; }
-        if let Some(c) = cfg.text.as_deref().and_then(parse_hex) { text = c; }
-        if let Some(c) = cfg.muted.as_deref().and_then(parse_hex) { muted = c; }
-        if let Some(c) = cfg.accent.as_deref().and_then(parse_hex) { accent = c; }
-        if let Some(c) = cfg.selection.as_deref().and_then(parse_hex) { selection = c; }
+        if let Some(c) = cfg.background.as_deref().and_then(parse_hex) {
+            bg = c;
+        }
+        if let Some(c) = cfg.text.as_deref().and_then(parse_hex) {
+            text = c;
+        }
+        if let Some(c) = cfg.muted.as_deref().and_then(parse_hex) {
+            muted = c;
+        }
+        if let Some(c) = cfg.accent.as_deref().and_then(parse_hex) {
+            accent = c;
+        }
+        if let Some(c) = cfg.selection.as_deref().and_then(parse_hex) {
+            selection = c;
+        }
 
         let placeholder = cfg
             .placeholder
@@ -132,10 +160,10 @@ fn string_table(v: &toml::Value) -> HashMap<String, String> {
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(path)
 }

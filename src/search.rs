@@ -1,5 +1,5 @@
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
+use nucleo_matcher::{Config, Matcher};
 
 use crate::entry::Entry;
 use crate::usage::Usage;
@@ -13,11 +13,9 @@ pub fn rank(query: &str, apps: &[Entry], limit: usize, usage: &Usage, freq_on: b
 
     let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
     let mut matcher = Matcher::new(Config::DEFAULT);
-    let mut buf: Vec<char> = Vec::new();
-
     let mut scored: Vec<(u32, usize)> = Vec::new();
     for (i, app) in apps.iter().enumerate() {
-        if let Some(score) = best_score(&pattern, &mut matcher, &mut buf, app) {
+        if let Some(score) = best_score(&pattern, &mut matcher, app) {
             let boost = if freq_on { usage.boost(&app.id) } else { 0 };
             scored.push((score + boost, i));
         }
@@ -31,21 +29,16 @@ pub fn rank(query: &str, apps: &[Entry], limit: usize, usage: &Usage, freq_on: b
     scored.into_iter().map(|(_, i)| i).collect()
 }
 
-fn best_score(
-    pattern: &Pattern,
-    matcher: &mut Matcher,
-    buf: &mut Vec<char>,
-    app: &Entry,
-) -> Option<u32> {
+fn best_score(pattern: &Pattern, matcher: &mut Matcher, app: &Entry) -> Option<u32> {
     let mut best = pattern
-        .score(Utf32Str::new(&app.name, buf), matcher)
+        .score(app.search_name.slice(..), matcher)
         .map(|s| s + NAME_BOOST);
 
-    if let Some(generic) = &app.generic_name {
-        best = max_opt(best, pattern.score(Utf32Str::new(generic, buf), matcher));
+    if let Some(generic) = &app.search_generic_name {
+        best = max_opt(best, pattern.score(generic.slice(..), matcher));
     }
-    for kw in &app.keywords {
-        best = max_opt(best, pattern.score(Utf32Str::new(kw, buf), matcher));
+    for keyword in &app.search_keywords {
+        best = max_opt(best, pattern.score(keyword.slice(..), matcher));
     }
     best
 }

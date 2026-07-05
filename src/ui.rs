@@ -7,20 +7,25 @@ use iced::alignment::Vertical;
 use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
 use iced::mouse;
-use iced::widget::{container, image, mouse_area, pin, responsive, stack, svg, text, text_input, Column, Row, Space};
+use iced::widget::{
+    Column, Row, Space, container, image, mouse_area, pin, responsive, stack, svg, text, text_input,
+};
 use iced::{Color, Element, Event, Length, Padding, Pixels, Task};
 
+use iced_layershell::actions::ActionCallback;
 use iced_layershell::application;
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
+use iced_layershell::build_pattern::daemon;
+use iced_layershell::reexport::{
+    Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
+};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::to_layer_message;
 
-use crate::apps::IconResolver;
 use crate::config::{Config, HorizontalPlacement, ResultsPlacement, VerticalPlacement};
 use crate::entry::Entry;
 use crate::theme::Theme;
 use crate::usage::Usage;
-use crate::{kde, launch, providers, search, style};
+use crate::{executor, kde, launch, providers, resident, search, style};
 
 const SEARCH_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><line x1="21" y1="21" x2="16.8" y2="16.8"/></svg>"##;
 
@@ -40,42 +45,88 @@ enum Held {
 pub fn run(config: Config, initial_query: Option<String>) -> Result<(), iced_layershell::Error> {
     let default_font = resolve_font(&config);
     let text_size = config.font.size();
-    let namespace = if config.behavior.opening_animation {
-        crate::APP_ID
-    } else {
-        // KWin applies its normal-window fade to arbitrary layer-shell namespaces.
-        // Its utility classification is intentionally excluded from opening effects.
-        "utility"
-    };
+    let namespace = namespace(&config);
 
     application(
-        move || Launcher::new(config.clone(), initial_query.clone()),
+        move || Launcher::new(config.clone(), initial_query.clone(), false),
         namespace,
         Launcher::update,
         Launcher::view,
     )
-        .style(Launcher::style)
-        .subscription(Launcher::subscription)
-        .theme(|_state: &Launcher| iced::Theme::Dark)
-        .settings(Settings {
-            layer_settings: LayerShellSettings {
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-                exclusive_zone: 0,
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                ..Default::default()
-            },
-            default_font,
-            default_text_size: Pixels(text_size),
+    .style(Launcher::style)
+    .subscription(Launcher::subscription)
+    .theme(|_state: &Launcher| iced::Theme::Dark)
+    .settings(settings(default_font, text_size))
+    .executor::<executor::Executor>()
+    .run()
+}
+
+pub fn run_resident(
+    config: Config,
+    initial_query: Option<String>,
+) -> Result<(), iced_layershell::Error> {
+    let default_font = resolve_font(&config);
+    let text_size = config.font.size();
+    let namespace = namespace(&config).to_string();
+    let mut daemon_settings = settings(default_font, text_size);
+    daemon_settings.layer_settings.size = Some((0, 0));
+
+    daemon(
+        move || Launcher::new(config.clone(), initial_query.clone(), true),
+        move || namespace.clone(),
+        Launcher::update,
+        daemon_view,
+    )
+    .style(|state, theme| state.style(theme))
+    .subscription(Launcher::subscription)
+    .theme(|_state: &Launcher, _window| iced::Theme::Dark)
+    .settings(daemon_settings)
+    .executor::<executor::Executor>()
+    .run()
+}
+
+fn daemon_view(state: &Launcher, _window: iced::window::Id) -> Element<'_, Message> {
+    state.view()
+}
+
+fn namespace(config: &Config) -> &'static str {
+    if config.behavior.opening_animation {
+        crate::APP_ID
+    } else {
+        "utility"
+    }
+}
+
+fn settings(default_font: iced::Font, text_size: f32) -> Settings {
+    Settings {
+        layer_settings: LayerShellSettings {
+            layer: Layer::Overlay,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+            exclusive_zone: 0,
+            keyboard_interactivity: KeyboardInteractivity::Exclusive,
             ..Default::default()
-        })
-        .run()
+        },
+        default_font,
+        default_text_size: Pixels(text_size),
+        ..Default::default()
+    }
+}
+
+fn new_layer_settings(namespace: String) -> NewLayerShellSettings {
+    NewLayerShellSettings {
+        layer: Layer::Overlay,
+        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+        exclusive_zone: Some(0),
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        output_option: OutputOption::None,
+        namespace: Some(namespace),
+        ..Default::default()
+    }
 }
 
 fn resolve_font(config: &Config) -> iced::Font {
     let family = config.font.family.clone().or_else(kde::font_family);
     match family {
-        // Font::with_name needs a 'static name; the process is short-lived, so leak once.
         Some(f) if !f.is_empty() => iced::Font::with_name(Box::leak(f.into_boxed_str())),
         _ => iced::Font::with_name("Noto Sans"),
     }
@@ -91,58 +142,91 @@ struct Launcher {
     apps: Vec<Entry>,
     results: Vec<ResultRow>,
     selected: usize,
-    icons: IconResolver,
     usage: Usage,
     config: Config,
     theme: Theme,
     single_click: bool,
     last_click: Option<usize>,
     held: Option<(Held, Instant)>,
+    resident: bool,
+    visible: bool,
+    active_window: Option<iced::window::Id>,
 }
 
-#[to_layer_message]
+#[to_layer_message(multi)]
 #[derive(Debug, Clone)]
 enum Message {
     Changed(String),
     EntriesLoaded(Vec<Entry>),
-    Event(Event),
+    Event(iced::window::Id, Event),
     Activate(usize),
     Dismiss,
     Ignore,
     RepeatTick,
+    Persisted,
+    ResidentToggle(Option<String>),
+    WindowOpened(iced::window::Id),
+    WindowClosed(iced::window::Id),
 }
 
 impl Launcher {
-    fn new(config: Config, initial_query: Option<String>) -> (Self, Task<Message>) {
+    fn new(config: Config, initial_query: Option<String>, resident: bool) -> (Self, Task<Message>) {
         let theme = Theme::resolve(&config.theme);
-        let single_click = config.behavior.single_click.unwrap_or_else(kde::single_click);
-        let icons = IconResolver::new(config.icons.size, config.icons.theme.clone());
+        let single_click = config
+            .behavior
+            .single_click
+            .unwrap_or_else(kde::single_click);
         let plugin_config = config.plugins.clone();
+        let icon_size = if config.icons.show {
+            config.icons.size
+        } else {
+            0
+        };
+        let icon_theme = config.icons.theme.clone();
+        let plugin_icon_theme = config.icons.theme.clone();
 
         let launcher = Self {
             query: initial_query.unwrap_or_default(),
             apps: Vec::new(),
             results: Vec::new(),
             selected: 0,
-            icons,
             usage: Usage::load(),
             config,
             theme,
             single_click,
             last_click: None,
             held: None,
+            resident,
+            visible: true,
+            active_window: None,
         };
-        let mut startup = vec![focus_input(), Task::perform(
-            async { providers::load_applications() },
-            Message::EntriesLoaded,
-        )];
+        let mut startup = vec![
+            focus_input(),
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        providers::load_applications(icon_size, icon_theme)
+                    })
+                    .await
+                    .unwrap_or_default()
+                },
+                Message::EntriesLoaded,
+            ),
+        ];
         startup.extend(
             plugin_config
                 .into_iter()
                 .filter(|plugin| plugin.enabled)
                 .map(|plugin| {
+                    let icon_theme = plugin_icon_theme.clone();
                     Task::perform(
-                        async move { providers::load_plugin(plugin) },
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                providers::load_plugin(plugin, icon_size, icon_theme)
+                            })
+                            .await
+                            .unwrap_or_default()
+                        },
                         Message::EntriesLoaded,
                     )
                 }),
@@ -161,7 +245,7 @@ impl Launcher {
                 self.set_query(self.query.clone());
                 Task::none()
             }
-            Message::Event(event) => self.handle_event(event),
+            Message::Event(window, event) => self.handle_event(window, event),
             Message::Activate(index) => {
                 if self.single_click || self.last_click == Some(index) {
                     self.launch_index(index)
@@ -171,23 +255,47 @@ impl Launcher {
                     Task::none()
                 }
             }
-            Message::Dismiss => iced_runtime::exit(),
+            Message::Dismiss => self.dismiss(),
             Message::Ignore => focus_input(),
             Message::RepeatTick => self.repeat_tick(),
+            Message::Persisted => {
+                if self.resident {
+                    Task::none()
+                } else {
+                    iced_runtime::exit()
+                }
+            }
+            Message::ResidentToggle(query) => self.toggle(query),
+            Message::WindowOpened(id) => {
+                self.active_window = Some(id);
+                self.visible = true;
+                focus_input()
+            }
+            Message::WindowClosed(id) => {
+                if self.active_window == Some(id) {
+                    self.active_window = None;
+                    self.visible = false;
+                }
+                Task::none()
+            }
             _ => Task::none(),
         }
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
         let keys = iced::event::listen_with(key_filter);
-        if self.held.is_some() {
-            iced::Subscription::batch([
-                keys,
-                iced::time::every(REPEAT_INTERVAL).map(|_| Message::RepeatTick),
-            ])
-        } else {
-            keys
+        let mut subscriptions = vec![
+            keys,
+            iced::window::open_events().map(Message::WindowOpened),
+            iced::window::close_events().map(Message::WindowClosed),
+        ];
+        if self.resident {
+            subscriptions.push(resident::subscription().map(Message::ResidentToggle));
         }
+        if self.held.is_some() {
+            subscriptions.push(iced::time::every(REPEAT_INTERVAL).map(|_| Message::RepeatTick));
+        }
+        iced::Subscription::batch(subscriptions)
     }
 
     fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
@@ -198,6 +306,9 @@ impl Launcher {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        if self.resident && !self.visible {
+            return Space::new().width(Length::Fill).height(Length::Fill).into();
+        }
         let launcher = responsive(|size| {
             let placement = &self.config.placement;
             let width = self.config.window.width.min(size.width).max(1.0);
@@ -214,8 +325,8 @@ impl Launcher {
                 VerticalPlacement::Bottom => size.height - height - margin,
             };
             let x = (base_x + placement.x_offset).clamp(0.0, (size.width - width).max(0.0));
-            let search_y = (base_y + placement.y_offset)
-                .clamp(0.0, (size.height - height).max(0.0));
+            let search_y =
+                (base_y + placement.y_offset).clamp(0.0, (size.height - height).max(0.0));
             let y = match placement.results {
                 ResultsPlacement::Below => search_y,
                 ResultsPlacement::Above => search_y - self.results_stack_height(),
@@ -233,7 +344,7 @@ impl Launcher {
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
-                .on_press(Message::Dismiss);
+            .on_press(Message::Dismiss);
             stack![backdrop, launcher].into()
         } else {
             launcher.into()
@@ -247,7 +358,12 @@ impl Launcher {
         let input = text_input(&self.config.input.placeholder, &self.query)
             .id(INPUT_ID.clone())
             .on_input(Message::Changed)
-            .size(self.config.input.font_size.unwrap_or_else(|| self.config.font.size()))
+            .size(
+                self.config
+                    .input
+                    .font_size
+                    .unwrap_or_else(|| self.config.font.size()),
+            )
             .padding(Padding::ZERO)
             .style(move |_theme, _status| input_style);
 
@@ -341,9 +457,11 @@ impl Launcher {
             None => Space::new().width(size).height(size).into(),
         };
 
-        let mut labels = Column::new()
-            .spacing(1)
-            .push(text(&app.name).size(style::NAME_FONT_SIZE).color(self.theme.text));
+        let mut labels = Column::new().spacing(1).push(
+            text(&app.name)
+                .size(style::NAME_FONT_SIZE)
+                .color(self.theme.text),
+        );
         if let Some(sub) = app.generic_name.as_deref().or(app.comment.as_deref()) {
             labels = labels.push(
                 text(sub.to_string())
@@ -383,9 +501,12 @@ impl Launcher {
         let results = ranked
             .into_iter()
             .map(|i| {
-                let icon = self.config.icons.show.then(|| self.apps[i].icon.clone())
-                    .flatten()
-                    .and_then(|name| self.icons.resolve(&name));
+                let icon = self
+                    .config
+                    .icons
+                    .show
+                    .then(|| self.apps[i].icon_path.clone())
+                    .flatten();
                 ResultRow { app: i, icon }
             })
             .collect();
@@ -397,10 +518,74 @@ impl Launcher {
     fn launch_index(&mut self, index: usize) -> Task<Message> {
         if let Some(r) = self.results.get(index) {
             let app = &self.apps[r.app];
-            self.usage.record(&app.id);
-            let _ = launch::launch(app);
+            if launch::launch(app).is_ok() {
+                self.usage.record(&app.id);
+                let usage = self.usage.clone();
+                let persist = Task::perform(
+                    async move {
+                        let _ = tokio::task::spawn_blocking(move || usage.save()).await;
+                    },
+                    |_| Message::Persisted,
+                );
+                if self.resident {
+                    return Task::batch([self.dismiss(), persist]);
+                }
+                return persist;
+            }
         }
-        iced_runtime::exit()
+        self.dismiss()
+    }
+
+    fn dismiss(&mut self) -> Task<Message> {
+        if !self.resident {
+            return iced_runtime::exit();
+        }
+        self.visible = false;
+        self.held = None;
+        if let Some(id) = self.active_window {
+            Task::batch([
+                Task::done(Message::KeyboardInteractivityChange {
+                    id,
+                    keyboard_interactivity: KeyboardInteractivity::None,
+                }),
+                Task::done(Message::SetInputRegion {
+                    id,
+                    callback: ActionCallback::new(|_| {}),
+                }),
+            ])
+        } else {
+            Task::none()
+        }
+    }
+
+    fn toggle(&mut self, query: Option<String>) -> Task<Message> {
+        if self.visible {
+            return self.dismiss();
+        }
+        self.query = query.unwrap_or_default();
+        self.set_query(self.query.clone());
+        self.visible = true;
+        if let Some(id) = self.active_window {
+            return Task::batch([
+                Task::done(Message::KeyboardInteractivityChange {
+                    id,
+                    keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                }),
+                Task::done(Message::SetInputRegion {
+                    id,
+                    callback: ActionCallback::new(|region| {
+                        region.add(0, 0, i32::MAX, i32::MAX);
+                    }),
+                }),
+                focus_input(),
+            ]);
+        }
+        let id = iced::window::Id::unique();
+        self.active_window = Some(id);
+        Task::done(Message::NewLayerShell {
+            settings: new_layer_settings(namespace(&self.config).to_string()),
+            id,
+        })
     }
 
     fn move_selection(&mut self, delta: i32) {
@@ -410,11 +595,14 @@ impl Launcher {
         self.selected = wrapped_index(self.selected, delta, self.results.len());
     }
 
-    fn handle_event(&mut self, event: Event) -> Task<Message> {
+    fn handle_event(&mut self, window: iced::window::Id, event: Event) -> Task<Message> {
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
-                                key, modifiers, text, ..
-                            }) => self.on_key_pressed(key, modifiers, text.map(|t| t.to_string())),
+                key,
+                modifiers,
+                text,
+                ..
+            }) => self.on_key_pressed(key, modifiers, text.map(|t| t.to_string())),
             Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
                 self.held = None;
                 Task::none()
@@ -431,11 +619,13 @@ impl Launcher {
                 Task::none()
             }
             Event::Window(iced::window::Event::Unfocused)
-            if self.config.behavior.close_on_focus_loss =>
-                {
-                    iced_runtime::exit()
-                }
+                if self.config.behavior.close_on_focus_loss =>
+            {
+                self.dismiss()
+            }
             Event::Window(iced::window::Event::Focused | iced::window::Event::Opened { .. }) => {
+                self.active_window = Some(window);
+                self.visible = true;
                 focus_input()
             }
             _ => Task::none(),
@@ -451,7 +641,7 @@ impl Launcher {
         let ctrl = modifiers.control();
         let plain = !ctrl && !modifiers.alt() && !modifiers.logo();
         let held: Option<Held> = match &key {
-            Key::Named(Named::Escape) => return iced_runtime::exit(),
+            Key::Named(Named::Escape) => return self.dismiss(),
             Key::Named(Named::Enter) => return self.launch_index(self.selected),
             Key::Named(Named::ArrowDown) => {
                 self.move_selection(1);
@@ -526,14 +716,14 @@ impl Launcher {
 fn key_filter(
     event: Event,
     _status: iced::event::Status,
-    _window: iced::window::Id,
+    window: iced::window::Id,
 ) -> Option<Message> {
     match event {
         Event::Keyboard(_)
         | Event::Mouse(mouse::Event::WheelScrolled { .. })
         | Event::Window(iced::window::Event::Focused)
         | Event::Window(iced::window::Event::Unfocused)
-        | Event::Window(iced::window::Event::Opened { .. }) => Some(Message::Event(event)),
+        | Event::Window(iced::window::Event::Opened { .. }) => Some(Message::Event(window, event)),
         _ => None,
     }
 }
@@ -543,7 +733,9 @@ fn focus_input() -> Task<Message> {
 }
 
 fn cursor_to_end() -> Task<Message> {
-    iced_runtime::task::widget(widget::operation::text_input::move_cursor_to_end(INPUT_ID.clone()))
+    iced_runtime::task::widget(widget::operation::text_input::move_cursor_to_end(
+        INPUT_ID.clone(),
+    ))
 }
 
 fn is_svg(path: &Path) -> bool {

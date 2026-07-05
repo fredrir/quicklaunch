@@ -13,7 +13,10 @@ pub trait Provider {
     fn load(&self) -> Result<Vec<Entry>, String>;
 }
 
-struct Applications;
+struct Applications {
+    icon_size: u16,
+    icon_theme: Option<String>,
+}
 
 impl Provider for Applications {
     fn name(&self) -> &str {
@@ -21,12 +24,14 @@ impl Provider for Applications {
     }
 
     fn load(&self) -> Result<Vec<Entry>, String> {
-        Ok(apps::index_apps())
+        Ok(apps::index_apps(self.icon_size, self.icon_theme.clone()))
     }
 }
 
 struct External {
     config: Plugin,
+    icon_size: u16,
+    icon_theme: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,7 +79,7 @@ impl Provider for External {
         let entries: Vec<ExternalEntry> = serde_json::from_slice(&output.stdout)
             .map_err(|error| format!("invalid JSON: {error}"))?;
 
-        entries
+        let mut entries: Vec<Entry> = entries
             .into_iter()
             .map(|entry| {
                 if entry.id.trim().is_empty() || entry.name.trim().is_empty() {
@@ -84,30 +89,42 @@ impl Provider for External {
                     return Err(format!("entry {:?} has an empty command", entry.id));
                 }
 
-                Ok(Entry {
-                    id: format!("{}:{}", self.config.name, entry.id),
-                    name: entry.name,
-                    generic_name: entry.generic_name,
-                    comment: entry.comment,
-                    keywords: entry.keywords,
-                    icon: entry.icon,
-                    action: LaunchAction::Command {
-                        argv: entry.command,
-                        terminal: entry.terminal,
-                    },
-                })
+                let action = LaunchAction::Command {
+                    argv: entry.command,
+                    terminal: entry.terminal,
+                };
+                Ok(Entry::new(
+                    format!("{}:{}", self.config.name, entry.id),
+                    entry.name,
+                    entry.generic_name,
+                    entry.comment,
+                    entry.keywords,
+                    entry.icon,
+                    action,
+                ))
             })
-            .collect()
+            .collect::<Result<_, _>>()?;
+        apps::resolve_icons(&mut entries, self.icon_size, self.icon_theme.clone());
+        Ok(entries)
     }
 }
 
-pub fn load(plugins: &[Plugin]) -> Vec<Entry> {
-    let mut providers: Vec<Box<dyn Provider>> = vec![Box::new(Applications)];
+pub fn load(plugins: &[Plugin], icon_size: u16, icon_theme: Option<String>) -> Vec<Entry> {
+    let mut providers: Vec<Box<dyn Provider>> = vec![Box::new(Applications {
+        icon_size,
+        icon_theme: icon_theme.clone(),
+    })];
     providers.extend(
         plugins
             .iter()
             .filter(|plugin| plugin.enabled)
-            .map(|config| Box::new(External { config: config.clone() }) as Box<dyn Provider>),
+            .map(|config| {
+                Box::new(External {
+                    config: config.clone(),
+                    icon_size,
+                    icon_theme: icon_theme.clone(),
+                }) as Box<dyn Provider>
+            }),
     );
 
     let mut entries = Vec::new();
@@ -120,12 +137,21 @@ pub fn load(plugins: &[Plugin]) -> Vec<Entry> {
     entries
 }
 
-pub fn load_applications() -> Vec<Entry> {
-    Applications.load().unwrap_or_default()
+pub fn load_applications(icon_size: u16, icon_theme: Option<String>) -> Vec<Entry> {
+    Applications {
+        icon_size,
+        icon_theme,
+    }
+    .load()
+    .unwrap_or_default()
 }
 
-pub fn load_plugin(config: Plugin) -> Vec<Entry> {
-    let provider = External { config };
+pub fn load_plugin(config: Plugin, icon_size: u16, icon_theme: Option<String>) -> Vec<Entry> {
+    let provider = External {
+        config,
+        icon_size,
+        icon_theme,
+    };
     match provider.load() {
         Ok(entries) => entries,
         Err(error) => {

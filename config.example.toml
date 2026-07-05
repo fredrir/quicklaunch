@@ -28,6 +28,7 @@ opening_animation = false
 close_on_click_outside = true
 close_on_focus_loss = true
 frequency_ranking = true
+resident = false
 # single_click: Use KDE's setting - (true/false)
 
 [theme]

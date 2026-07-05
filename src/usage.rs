@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
     #[serde(default)]
     apps: HashMap<String, Record>,
@@ -29,10 +29,12 @@ impl Usage {
 
     pub fn record(&mut self, entry_id: &str) {
         let now = now_unix();
-        let entry = self.apps.entry(entry_id.to_string()).or_insert(Record { count: 0, last: now });
+        let entry = self.apps.entry(entry_id.to_string()).or_insert(Record {
+            count: 0,
+            last: now,
+        });
         entry.count = entry.count.saturating_add(1);
         entry.last = now;
-        self.save();
     }
 
     pub fn boost(&self, entry_id: &str) -> u32 {
@@ -41,11 +43,11 @@ impl Usage {
         };
         let freq = ((1.0 + r.count as f64).ln() * 25.0) as u32;
         let age_days = now_unix().saturating_sub(r.last) as f64 / 86_400.0;
-        let recency = (40.0 * (-age_days / 14.0).exp()) as u32; // ~2 weeks
+        let recency = (40.0 * (-age_days / 14.0).exp()) as u32;
         freq + recency
     }
 
-    fn save(&self) {
+    pub fn save(&self) {
         let Some(path) = data_path() else {
             return;
         };

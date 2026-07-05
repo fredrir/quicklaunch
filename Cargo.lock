@@ -2474,17 +2474,21 @@ dependencies = [
 name = "quicklaunch"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "dirs 6.0.0",
  "freedesktop-desktop-entry",
  "freedesktop-icons",
  "iced",
+ "iced_futures",
  "iced_layershell",
  "iced_runtime",
  "image",
  "nucleo-matcher",
  "serde",
  "serde_json",
+ "tokio",
  "toml",
+ "wgpu",
 ]
 
 [[package]]

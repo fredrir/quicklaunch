@@ -3,9 +3,16 @@ name = "quicklaunch"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["gpu-search", "ui-wgpu"]
+gpu-search = ["dep:bytemuck", "dep:wgpu"]
+ui-wgpu = ["iced/wgpu"]
+ui-tiny-skia = ["iced/tiny-skia"]
+
 [dependencies]
-iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "svg", "image-without-codecs", "wgpu", "wayland"] }
+iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "svg", "image-without-codecs", "wayland"] }
 iced_layershell = { version = "0.18", default-features = false }
+iced_futures = "0.14"
 iced_runtime = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 freedesktop-desktop-entry = "0.8"
@@ -15,6 +22,9 @@ dirs = "6.0.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1.2"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+bytemuck = { version = "1", optional = true }
+wgpu = { version = "27", default-features = false, features = ["std", "vulkan", "wgsl"], optional = true }
 
 [profile.release]
 opt-level = 3

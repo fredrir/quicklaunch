@@ -1,9 +1,12 @@
 mod apps;
 mod config;
 mod entry;
+mod executor;
+pub mod gpu_search;
 mod kde;
 mod launch;
 mod providers;
+mod resident;
 mod search;
 mod single;
 mod style;
@@ -32,6 +35,19 @@ fn main() -> Result<(), iced_layershell::Error> {
         .position(|a| a == "--query")
         .and_then(|pos| args.get(pos + 1))
         .cloned();
+
+    if config.behavior.resident || args.iter().any(|arg| arg == "--daemon") {
+        if resident::notify(initial_query.as_deref()) {
+            return Ok(());
+        }
+        if let Err(error) = resident::claim() {
+            eprintln!("quicklaunch: resident socket: {error}");
+            return Ok(());
+        }
+        let result = ui::run_resident(config, initial_query);
+        resident::cleanup();
+        return result;
+    }
 
     if single::toggle_or_register() {
         return Ok(());
@@ -62,7 +78,15 @@ fn debug_theme(config: &config::Config) {
 }
 
 fn debug_list(config: &config::Config, query: Option<&str>) {
-    let apps = providers::load(&config.plugins);
+    let apps = providers::load(
+        &config.plugins,
+        if config.icons.show {
+            config.icons.size
+        } else {
+            0
+        },
+        config.icons.theme.clone(),
+    );
     let usage = usage::Usage::load();
     println!("indexed {} entries", apps.len());
 

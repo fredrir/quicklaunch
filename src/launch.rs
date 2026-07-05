@@ -1,27 +1,34 @@
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::entry::{Entry, LaunchAction};
 
 pub fn launch(entry: &Entry) -> std::io::Result<()> {
     match &entry.action {
-        LaunchAction::Desktop { path, argv, terminal } => {
+        LaunchAction::Desktop {
+            path,
+            argv,
+            terminal,
+            dbus_activatable,
+            working_dir,
+        } => {
             if *terminal {
                 return launch_terminal(argv);
             }
-            if which("gio") {
+            if *dbus_activatable {
                 let spawned = null_io(Command::new("gio").arg("launch").arg(path)).spawn();
                 if spawned.is_ok() {
                     return Ok(());
                 }
             }
-            launch_argv(argv)
+            launch_argv(argv, working_dir.as_deref())
         }
         LaunchAction::Command { argv, terminal } => {
             if *terminal {
                 launch_terminal(argv)
             } else {
-                launch_argv(argv)
+                launch_argv(argv, None)
             }
         }
     }
@@ -38,10 +45,10 @@ fn launch_terminal(command: &[String]) -> std::io::Result<()> {
         vec!["xterm".to_string(), "-e".to_string()]
     };
     argv.extend(command.iter().cloned());
-    launch_argv(&argv)
+    launch_argv(&argv, None)
 }
 
-fn launch_argv(argv: &[String]) -> std::io::Result<()> {
+fn launch_argv(argv: &[String], working_dir: Option<&Path>) -> std::io::Result<()> {
     if argv.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -49,18 +56,11 @@ fn launch_argv(argv: &[String]) -> std::io::Result<()> {
         ));
     }
 
-    if which("systemd-run") {
-        return null_io(
-            Command::new("systemd-run")
-                .args(["--user", "--scope", "--slice=app.slice", "--quiet", "--"])
-                .args(argv),
-        )
-            .spawn()
-            .map(|_| ());
-    }
-
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]).process_group(0);
+    if let Some(path) = working_dir {
+        cmd.current_dir(path);
+    }
     null_io(&mut cmd).spawn().map(|_| ())
 }
 

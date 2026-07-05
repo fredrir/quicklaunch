@@ -14,13 +14,13 @@ fn pid_path() -> PathBuf {
 pub fn toggle_or_register() -> bool {
     let path = pid_path();
 
-    if let Ok(contents) = fs::read_to_string(&path) {
-        if let Ok(pid) = contents.trim().parse::<u32>() {
-            if pid != std::process::id() && is_running_instance(pid) {
-                let _ = Command::new("kill").arg(pid.to_string()).status();
-                return true;
-            }
-        }
+    if let Ok(contents) = fs::read_to_string(&path)
+        && let Ok(pid) = contents.trim().parse::<u32>()
+        && pid != std::process::id()
+        && is_running_instance(pid)
+    {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+        return true;
     }
 
     let _ = fs::write(&path, std::process::id().to_string());
@@ -33,9 +33,7 @@ pub fn cleanup() {
 
 fn is_running_instance(pid: u32) -> bool {
     match fs::read(format!("/proc/{pid}/cmdline")) {
-        Ok(bytes) if !bytes.is_empty() => {
-            String::from_utf8_lossy(&bytes).contains(BIN_MARKER)
-        }
+        Ok(bytes) if !bytes.is_empty() => String::from_utf8_lossy(&bytes).contains(BIN_MARKER),
         _ => false,
     }
 }
