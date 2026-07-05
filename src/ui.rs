@@ -6,7 +6,8 @@ use iced::advanced::widget;
 use iced::alignment::Vertical;
 use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
-use iced::widget::{container, image, mouse_area, pin, responsive, row, stack, svg, text, text_input, Column, Space};
+use iced::mouse;
+use iced::widget::{container, image, mouse_area, pin, responsive, stack, svg, text, text_input, Column, Row, Space};
 use iced::{Color, Element, Event, Length, Padding, Pixels, Task};
 
 use iced_layershell::application;
@@ -14,11 +15,12 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::to_layer_message;
 
-use crate::apps::{self, AppEntry, IconResolver};
-use crate::config::Config;
+use crate::apps::IconResolver;
+use crate::config::{Config, HorizontalPlacement, ResultsPlacement, VerticalPlacement};
+use crate::entry::Entry;
 use crate::theme::Theme;
 use crate::usage::Usage;
-use crate::{kde, launch, search, style};
+use crate::{kde, launch, providers, search, style};
 
 const SEARCH_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><line x1="21" y1="21" x2="16.8" y2="16.8"/></svg>"##;
 
@@ -86,7 +88,7 @@ struct ResultRow {
 
 struct Launcher {
     query: String,
-    apps: Vec<AppEntry>,
+    apps: Vec<Entry>,
     results: Vec<ResultRow>,
     selected: usize,
     icons: IconResolver,
@@ -102,7 +104,7 @@ struct Launcher {
 #[derive(Debug, Clone)]
 enum Message {
     Changed(String),
-    AppsIndexed(Vec<AppEntry>),
+    EntriesLoaded(Vec<Entry>),
     Event(Event),
     Activate(usize),
     Dismiss,
@@ -115,6 +117,7 @@ impl Launcher {
         let theme = Theme::resolve(&config.theme);
         let single_click = config.behavior.single_click.unwrap_or_else(kde::single_click);
         let icons = IconResolver::new(config.icons.size, config.icons.theme.clone());
+        let plugin_config = config.plugins.clone();
 
         let launcher = Self {
             query: initial_query.unwrap_or_default(),
@@ -129,8 +132,22 @@ impl Launcher {
             last_click: None,
             held: None,
         };
-        let index_apps = Task::perform(async { apps::index_apps() }, Message::AppsIndexed);
-        (launcher, Task::batch([focus_input(), index_apps]))
+        let mut startup = vec![focus_input(), Task::perform(
+            async { providers::load_applications() },
+            Message::EntriesLoaded,
+        )];
+        startup.extend(
+            plugin_config
+                .into_iter()
+                .filter(|plugin| plugin.enabled)
+                .map(|plugin| {
+                    Task::perform(
+                        async move { providers::load_plugin(plugin) },
+                        Message::EntriesLoaded,
+                    )
+                }),
+        );
+        (launcher, Task::batch(startup))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -139,8 +156,8 @@ impl Launcher {
                 self.set_query(query);
                 Task::none()
             }
-            Message::AppsIndexed(apps) => {
-                self.apps = apps;
+            Message::EntriesLoaded(mut apps) => {
+                self.apps.append(&mut apps);
                 self.set_query(self.query.clone());
                 Task::none()
             }
@@ -182,8 +199,27 @@ impl Launcher {
 
     fn view(&self) -> Element<'_, Message> {
         let launcher = responsive(|size| {
-            let x = ((size.width - self.config.window.width) / 2.0).max(0.0);
-            let y = ((size.height - style::SEARCH_BAR_HEIGHT) / 2.0).max(0.0);
+            let placement = &self.config.placement;
+            let width = self.config.window.width.min(size.width).max(1.0);
+            let height = self.config.input.height.min(size.height).max(1.0);
+            let margin = placement.margin.max(0.0);
+            let base_x = match placement.horizontal {
+                HorizontalPlacement::Left => margin,
+                HorizontalPlacement::Center => (size.width - width) / 2.0,
+                HorizontalPlacement::Right => size.width - width - margin,
+            };
+            let base_y = match placement.vertical {
+                VerticalPlacement::Top => margin,
+                VerticalPlacement::Center => (size.height - height) / 2.0,
+                VerticalPlacement::Bottom => size.height - height - margin,
+            };
+            let x = (base_x + placement.x_offset).clamp(0.0, (size.width - width).max(0.0));
+            let search_y = (base_y + placement.y_offset)
+                .clamp(0.0, (size.height - height).max(0.0));
+            let y = match placement.results {
+                ResultsPlacement::Below => search_y,
+                ResultsPlacement::Above => search_y - self.results_stack_height(),
+            };
 
             pin(mouse_area(self.panel()).on_press(Message::Ignore))
                 .x(x)
@@ -207,29 +243,38 @@ impl Launcher {
     fn panel(&self) -> Element<'_, Message> {
         let win = &self.config.window;
 
-        let magnifier = svg(svg::Handle::from_memory(SEARCH_ICON))
-            .width(Length::Fixed(style::SEARCH_ICON_SIZE))
-            .height(Length::Fixed(style::SEARCH_ICON_SIZE));
-
         let input_style = style::search_input(&self.theme);
-        let input = text_input("Search applications…", &self.query)
+        let input = text_input(&self.config.input.placeholder, &self.query)
             .id(INPUT_ID.clone())
             .on_input(Message::Changed)
-            .size(self.config.font.size())
+            .size(self.config.input.font_size.unwrap_or_else(|| self.config.font.size()))
             .padding(Padding::ZERO)
             .style(move |_theme, _status| input_style);
 
+        let mut input_row = Row::new().align_y(iced::Center);
+        if self.config.input.show_search_icon {
+            let icon_size = Length::Fixed(self.config.input.search_icon_size.max(1.0));
+            input_row = input_row
+                .push(
+                    svg(svg::Handle::from_memory(SEARCH_ICON))
+                        .width(icon_size)
+                        .height(icon_size),
+                )
+                .spacing(self.config.input.icon_spacing.max(0.0));
+        }
+        input_row = input_row.push(input);
+
         let pill_style = style::panel(&self.theme, win.radius, win.opacity);
-        let pill = container(row![magnifier, input].spacing(12).align_y(iced::Center))
-            .padding(Padding::from([14.0, 18.0]))
+        let pill = container(input_row)
+            .padding(Padding::from([
+                self.config.input.padding_vertical.max(0.0),
+                self.config.input.padding_horizontal.max(0.0),
+            ]))
             .width(Length::Fill)
-            .height(Length::Fixed(style::SEARCH_BAR_HEIGHT))
+            .height(Length::Fixed(self.config.input.height.max(1.0)))
             .style(move |_theme| pill_style);
 
-        let mut root = Column::new()
-            .width(Length::Fixed(win.width))
-            .spacing(style::GAP)
-            .push(pill);
+        let mut result_list = None;
 
         if !self.query.is_empty() && !self.results.is_empty() {
             let rows: Vec<Element<Message>> = self
@@ -244,10 +289,34 @@ impl Launcher {
                 .padding(style::PANEL_PADDING)
                 .width(Length::Fill)
                 .style(move |_theme| list_style);
-            root = root.push(list);
+            result_list = Some(list);
+        }
+
+        let mut root = Column::new()
+            .width(Length::Fixed(win.width))
+            .spacing(style::GAP);
+        match (self.config.placement.results, result_list) {
+            (ResultsPlacement::Above, Some(list)) => {
+                root = root.push(list).push(pill);
+            }
+            (_, Some(list)) => {
+                root = root.push(pill).push(list);
+            }
+            (_, None) => {
+                root = root.push(pill);
+            }
         }
 
         root.into()
+    }
+
+    fn results_stack_height(&self) -> f32 {
+        if self.query.is_empty() || self.results.is_empty() {
+            return 0.0;
+        }
+        let rows = self.results.len() as f32;
+        let spacing = self.results.len().saturating_sub(1) as f32 * style::ROW_SPACING;
+        rows * self.config.window.row_height + spacing + style::PANEL_PADDING * 2.0 + style::GAP
     }
 
     fn result_row(&self, i: usize, r: &ResultRow) -> Element<'_, Message> {
@@ -264,11 +333,12 @@ impl Launcher {
                 .width(size)
                 .height(size)
                 .into(),
-            None => container(Space::new())
+            None if self.config.icons.show_fallback => container(Space::new())
                 .width(size)
                 .height(size)
                 .style(move |_theme| generic)
                 .into(),
+            None => Space::new().width(size).height(size).into(),
         };
 
         let mut labels = Column::new()
@@ -283,11 +353,15 @@ impl Launcher {
         }
 
         let row_style = style::row(&self.theme, i == self.selected);
-        let body = container(
-            row![icon, labels]
-                .spacing(style::ICON_TEXT_SPACING)
-                .align_y(iced::Center),
-        )
+        let mut contents = Row::new().align_y(iced::Center);
+        if self.config.icons.show {
+            contents = contents
+                .push(icon)
+                .spacing(self.config.icons.spacing.max(0.0));
+        }
+        contents = contents.push(labels);
+
+        let body = container(contents)
             .width(Length::Fill)
             .height(Length::Fixed(self.config.window.row_height))
             .align_y(Vertical::Center)
@@ -309,9 +383,8 @@ impl Launcher {
         let results = ranked
             .into_iter()
             .map(|i| {
-                let icon = self.apps[i]
-                    .icon
-                    .clone()
+                let icon = self.config.icons.show.then(|| self.apps[i].icon.clone())
+                    .flatten()
                     .and_then(|name| self.icons.resolve(&name));
                 ResultRow { app: i, icon }
             })
@@ -324,7 +397,7 @@ impl Launcher {
     fn launch_index(&mut self, index: usize) -> Task<Message> {
         if let Some(r) = self.results.get(index) {
             let app = &self.apps[r.app];
-            self.usage.record(&app.desktop_id);
+            self.usage.record(&app.id);
             let _ = launch::launch(app);
         }
         iced_runtime::exit()
@@ -334,8 +407,7 @@ impl Launcher {
         if self.results.is_empty() {
             return;
         }
-        let last = self.results.len() as i32 - 1;
-        self.selected = (self.selected as i32 + delta).clamp(0, last) as usize;
+        self.selected = wrapped_index(self.selected, delta, self.results.len());
     }
 
     fn handle_event(&mut self, event: Event) -> Task<Message> {
@@ -345,6 +417,17 @@ impl Launcher {
                             }) => self.on_key_pressed(key, modifiers, text.map(|t| t.to_string())),
             Event::Keyboard(keyboard::Event::KeyReleased { .. }) => {
                 self.held = None;
+                Task::none()
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                let y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => y,
+                };
+                if y < 0.0 {
+                    self.move_selection(1);
+                } else if y > 0.0 {
+                    self.move_selection(-1);
+                }
                 Task::none()
             }
             Event::Window(iced::window::Event::Unfocused)
@@ -447,6 +530,7 @@ fn key_filter(
 ) -> Option<Message> {
     match event {
         Event::Keyboard(_)
+        | Event::Mouse(mouse::Event::WheelScrolled { .. })
         | Event::Window(iced::window::Event::Focused)
         | Event::Window(iced::window::Event::Unfocused)
         | Event::Window(iced::window::Event::Opened { .. }) => Some(Message::Event(event)),
@@ -466,4 +550,25 @@ fn is_svg(path: &Path) -> bool {
     path.extension()
         .map(|e| e.eq_ignore_ascii_case("svg"))
         .unwrap_or(false)
+}
+
+fn wrapped_index(current: usize, delta: i32, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (current as i64 + delta as i64).rem_euclid(len as i64) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped_index;
+
+    #[test]
+    fn selection_wraps_in_both_directions() {
+        assert_eq!(wrapped_index(2, 1, 3), 0);
+        assert_eq!(wrapped_index(0, -1, 3), 2);
+        assert_eq!(wrapped_index(1, 5, 3), 0);
+        assert_eq!(wrapped_index(0, -5, 3), 1);
+        assert_eq!(wrapped_index(0, 1, 0), 0);
+    }
 }

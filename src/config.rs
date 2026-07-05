@@ -4,10 +4,109 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub window: Window,
+    pub input: Input,
+    pub placement: Placement,
     pub behavior: Behavior,
     pub theme: ThemeCfg,
     pub font: FontCfg,
     pub icons: IconsCfg,
+    pub plugins: Vec<Plugin>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Plugin {
+    pub name: String,
+    pub command: Vec<String>,
+    pub enabled: bool,
+}
+
+impl Default for Plugin {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            command: Vec::new(),
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Input {
+    pub placeholder: String,
+    pub height: f32,
+    pub font_size: Option<f32>,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub show_search_icon: bool,
+    pub search_icon_size: f32,
+    pub icon_spacing: f32,
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        Self {
+            placeholder: "Search applications…".to_string(),
+            height: 52.0,
+            font_size: None,
+            padding_horizontal: 18.0,
+            padding_vertical: 14.0,
+            show_search_icon: true,
+            search_icon_size: 22.0,
+            icon_spacing: 12.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HorizontalPlacement {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VerticalPlacement {
+    Top,
+    #[default]
+    Center,
+    Bottom,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResultsPlacement {
+    #[default]
+    Below,
+    Above,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Placement {
+    pub horizontal: HorizontalPlacement,
+    pub vertical: VerticalPlacement,
+    pub x_offset: f32,
+    pub y_offset: f32,
+    pub margin: f32,
+    pub results: ResultsPlacement,
+}
+
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            horizontal: HorizontalPlacement::Center,
+            vertical: VerticalPlacement::Center,
+            x_offset: 0.0,
+            y_offset: 0.0,
+            margin: 24.0,
+            results: ResultsPlacement::Below,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,15 +192,21 @@ impl FontCfg {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct IconsCfg {
+    pub show: bool,
     pub size: u16,
     pub theme: Option<String>,
+    pub spacing: f32,
+    pub show_fallback: bool,
 }
 
 impl Default for IconsCfg {
     fn default() -> Self {
         Self {
+            show: true,
             size: 40,
             theme: None,
+            spacing: 14.0,
+            show_fallback: true,
         }
     }
 }
@@ -118,5 +223,15 @@ impl Config {
             }),
             Err(_) => Self::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn example_config_is_valid() {
+        toml::from_str::<Config>(include_str!("../config.example.toml")).unwrap();
     }
 }

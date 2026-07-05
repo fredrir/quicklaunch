@@ -1,7 +1,9 @@
 mod apps;
 mod config;
+mod entry;
 mod kde;
 mod launch;
+mod providers;
 mod search;
 mod single;
 mod style;
@@ -60,9 +62,9 @@ fn debug_theme(config: &config::Config) {
 }
 
 fn debug_list(config: &config::Config, query: Option<&str>) {
-    let apps = apps::index_apps();
+    let apps = providers::load(&config.plugins);
     let usage = usage::Usage::load();
-    println!("indexed {} applications", apps.len());
+    println!("indexed {} entries", apps.len());
 
     match query {
         Some(q) => {
@@ -80,7 +82,7 @@ fn debug_list(config: &config::Config, query: Option<&str>) {
                     "  {:<28} icon={:<24} term={}",
                     app.name,
                     app.icon.as_deref().unwrap_or("-"),
-                    app.terminal,
+                    app.terminal(),
                 );
             }
         }

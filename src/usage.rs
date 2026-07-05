@@ -27,16 +27,16 @@ impl Usage {
             .unwrap_or_default()
     }
 
-    pub fn record(&mut self, desktop_id: &str) {
+    pub fn record(&mut self, entry_id: &str) {
         let now = now_unix();
-        let entry = self.apps.entry(desktop_id.to_string()).or_insert(Record { count: 0, last: now });
+        let entry = self.apps.entry(entry_id.to_string()).or_insert(Record { count: 0, last: now });
         entry.count = entry.count.saturating_add(1);
         entry.last = now;
         self.save();
     }
 
-    pub fn boost(&self, desktop_id: &str) -> u32 {
-        let Some(r) = self.apps.get(desktop_id) else {
+    pub fn boost(&self, entry_id: &str) -> u32 {
+        let Some(r) = self.apps.get(entry_id) else {
             return 0;
         };
         let freq = ((1.0 + r.count as f64).ln() * 25.0) as u32;

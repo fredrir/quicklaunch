@@ -5,8 +5,26 @@ radius = 16
 row_height = 52
 opacity = 0.96   # bg alpha (0.0–1.0)
 
+[input]
+placeholder = "Search applications…"
+height = 52
+# font_size = 20                 # defaults to [font].size
+padding_horizontal = 18
+padding_vertical = 14
+show_search_icon = true
+search_icon_size = 22
+icon_spacing = 12
+
+[placement]
+horizontal = "center"           # left, center, right
+vertical = "center"             # top, center, bottom
+x_offset = 0
+y_offset = 0
+margin = 24
+results = "below"                # below, above
+
 [behavior]
-opening_animation = false   # opt in to KWin's opening animation
+opening_animation = false
 close_on_click_outside = true
 close_on_focus_loss = true
 frequency_ranking = true
@@ -16,7 +34,7 @@ frequency_ranking = true
 #   "auto"    (default)
 #   "config" only config.toml
 #   "kde"     only KDE
-#   "custom"  only hex overrides below
+#   "custom"  only values below
 source = "auto"
 config_path = "~/.config/quicklaunch/config.toml"
 
@@ -33,6 +51,15 @@ config_path = "~/.config/quicklaunch/config.toml"
 size = 20
 
 [icons]
+show = true
 size = 40
+spacing = 14
+show_fallback = true
 # theme:
 # theme = "breeze-dark"
+
+# External providers are executable plugins. Each prints a JSON array of entries.
+# [[plugins]]
+# name = "bookmarks"
+# command = ["python3", "/path/to/bookmarks-plugin.py"]
+# enabled = true

@@ -6,13 +6,10 @@ use crate::theme::{with_alpha, Theme};
 // Fixed geometry.
 pub const NAME_FONT_SIZE: f32 = 15.0;
 pub const MUTED_FONT_SIZE: f32 = 12.0;
-pub const SEARCH_ICON_SIZE: f32 = 22.0;
-pub const SEARCH_BAR_HEIGHT: f32 = 52.0;
 pub const ROW_RADIUS: f32 = 10.0;
 pub const ROW_SPACING: f32 = 2.0;
 pub const PANEL_PADDING: f32 = 10.0;
 pub const GAP: f32 = 12.0;
-pub const ICON_TEXT_SPACING: f32 = 14.0;
 pub const SELECTION_ALPHA: f32 = 0.22;
 
 const NO_SHADOW: Shadow = Shadow {

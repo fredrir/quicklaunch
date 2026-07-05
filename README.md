@@ -26,3 +26,14 @@ quicklaunch --theme         # theme colors
 ## Configuration
 
 See [`config.example.toml`](config.example.toml) for full example.
+
+## Plugins
+
+Configured with `[[plugins]]`:
+
+```toml
+[[plugins]]
+name = "bookmarks"
+command = ["python3", "/path/to/bookmarks-plugin.py"]
+enabled = true
+```

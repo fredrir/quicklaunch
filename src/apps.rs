@@ -3,27 +3,15 @@ use std::path::{Path, PathBuf};
 
 use freedesktop_desktop_entry::{default_paths, get_languages_from_env, DesktopEntry, Iter};
 
+use crate::entry::{Entry, LaunchAction};
 use crate::kde;
 
-#[derive(Debug, Clone)]
-pub struct AppEntry {
-    pub name: String,
-    pub generic_name: Option<String>,
-    pub comment: Option<String>,
-    pub keywords: Vec<String>,
-    pub desktop_id: String,
-    pub desktop_path: PathBuf,
-    pub icon: Option<String>,
-    pub argv: Vec<String>,
-    pub terminal: bool,
-}
-
-pub fn index_apps() -> Vec<AppEntry> {
+pub fn index_apps() -> Vec<Entry> {
     let locales = get_languages_from_env();
     let desktops = current_desktops();
 
     let mut seen: HashSet<String> = HashSet::new();
-    let mut apps: Vec<AppEntry> = Vec::new();
+    let mut apps: Vec<Entry> = Vec::new();
 
     for entry in Iter::new(default_paths()).entries(Some(&locales)) {
         if !seen.insert(entry.appid.clone()) {
@@ -69,14 +57,15 @@ fn is_visible(e: &DesktopEntry, desktops: &[String]) -> bool {
     true
 }
 
-fn to_app_entry(e: &DesktopEntry, locales: &[String]) -> Option<AppEntry> {
+fn to_app_entry(e: &DesktopEntry, locales: &[String]) -> Option<Entry> {
     let name = e.name(locales)?.to_string();
     if name.is_empty() {
         return None;
     }
     let argv = e.parse_exec_with_uris(&[], locales).unwrap_or_default();
 
-    Some(AppEntry {
+    Some(Entry {
+        id: e.appid.clone(),
         name,
         generic_name: e
             .generic_name(locales)
@@ -90,11 +79,12 @@ fn to_app_entry(e: &DesktopEntry, locales: &[String]) -> Option<AppEntry> {
             .keywords(locales)
             .map(|v| v.into_iter().map(|c| c.to_string()).collect())
             .unwrap_or_default(),
-        desktop_id: e.appid.clone(),
-        desktop_path: e.path.clone(),
         icon: e.icon().map(|s| s.to_string()),
-        argv,
-        terminal: e.terminal(),
+        action: LaunchAction::Desktop {
+            path: e.path.clone(),
+            argv,
+            terminal: e.terminal(),
+        },
     })
 }
 

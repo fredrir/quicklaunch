@@ -1,24 +1,33 @@
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
-use crate::apps::AppEntry;
+use crate::entry::{Entry, LaunchAction};
 
-pub fn launch(app: &AppEntry) -> std::io::Result<()> {
-    if app.terminal {
-        return launch_terminal(app);
-    }
-
-    if which("gio") {
-        let spawned = null_io(Command::new("gio").arg("launch").arg(&app.desktop_path)).spawn();
-        if spawned.is_ok() {
-            return Ok(());
+pub fn launch(entry: &Entry) -> std::io::Result<()> {
+    match &entry.action {
+        LaunchAction::Desktop { path, argv, terminal } => {
+            if *terminal {
+                return launch_terminal(argv);
+            }
+            if which("gio") {
+                let spawned = null_io(Command::new("gio").arg("launch").arg(path)).spawn();
+                if spawned.is_ok() {
+                    return Ok(());
+                }
+            }
+            launch_argv(argv)
+        }
+        LaunchAction::Command { argv, terminal } => {
+            if *terminal {
+                launch_terminal(argv)
+            } else {
+                launch_argv(argv)
+            }
         }
     }
-
-    launch_argv(&app.argv)
 }
 
-fn launch_terminal(app: &AppEntry) -> std::io::Result<()> {
+fn launch_terminal(command: &[String]) -> std::io::Result<()> {
     let mut argv: Vec<String> = if which("xdg-terminal-exec") {
         vec!["xdg-terminal-exec".to_string()]
     } else if let Ok(term) = std::env::var("TERMINAL") {
@@ -28,7 +37,7 @@ fn launch_terminal(app: &AppEntry) -> std::io::Result<()> {
     } else {
         vec!["xterm".to_string(), "-e".to_string()]
     };
-    argv.extend(app.argv.iter().cloned());
+    argv.extend(command.iter().cloned());
     launch_argv(&argv)
 }
 
