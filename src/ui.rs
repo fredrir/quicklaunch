@@ -102,6 +102,7 @@ struct Launcher {
 #[derive(Debug, Clone)]
 enum Message {
     Changed(String),
+    AppsIndexed(Vec<AppEntry>),
     Event(Event),
     Activate(usize),
     Dismiss,
@@ -115,9 +116,9 @@ impl Launcher {
         let single_click = config.behavior.single_click.unwrap_or_else(kde::single_click);
         let icons = IconResolver::new(config.icons.size, config.icons.theme.clone());
 
-        let mut launcher = Self {
-            query: String::new(),
-            apps: apps::index_apps(),
+        let launcher = Self {
+            query: initial_query.unwrap_or_default(),
+            apps: Vec::new(),
             results: Vec::new(),
             selected: 0,
             icons,
@@ -128,16 +129,19 @@ impl Launcher {
             last_click: None,
             held: None,
         };
-        if let Some(query) = initial_query {
-            launcher.set_query(query);
-        }
-        (launcher, focus_input())
+        let index_apps = Task::perform(async { apps::index_apps() }, Message::AppsIndexed);
+        (launcher, Task::batch([focus_input(), index_apps]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Changed(query) => {
                 self.set_query(query);
+                Task::none()
+            }
+            Message::AppsIndexed(apps) => {
+                self.apps = apps;
+                self.set_query(self.query.clone());
                 Task::none()
             }
             Message::Event(event) => self.handle_event(event),

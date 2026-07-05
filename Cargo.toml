@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.14", features = ["tokio", "advanced", "svg", "image"] }
-iced_layershell = "0.18"
+iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "svg", "image-without-codecs", "wgpu", "wayland"] }
+iced_layershell = { version = "0.18", default-features = false }
 iced_runtime = "0.14"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 freedesktop-desktop-entry = "0.8"
 nucleo-matcher = "0.3"
 freedesktop-icons = "0.4"
