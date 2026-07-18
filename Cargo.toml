@@ -11,7 +11,7 @@ ui-tiny-skia = ["iced/tiny-skia"]
 
 [dependencies]
 iced = { version = "0.14", default-features = false, features = ["tokio", "advanced", "svg", "image-without-codecs", "wayland"] }
-iced_layershell = { version = "0.18", default-features = false }
+iced_layershell = { version = "0.19", default-features = false }
 iced_futures = "0.14"
 iced_runtime = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
